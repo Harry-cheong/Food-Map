@@ -1,0 +1,182 @@
+/* ── Reset & base ─────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+/* ── Design tokens ───────────────────────────────────── */
+:root {
+  --bg:              #F5F4F0;
+  --surface:         #FFFFFF;
+  --surface-raised:  #FAFAF8;
+  --sidebar-bg:      #FAFAF8;
+  --border:          #E4E2DC;
+  --border-soft:     #EEEDEA;
+  --text:            #1A1A18;
+  --text-secondary:  #6B6960;
+  --text-muted:      #9C9A92;
+  --text-hint:       #B8B6AE;
+  --accent:          #0F6E56;
+  --accent-hover:    #0C5A45;
+  --accent-bg:       #E1F5EE;
+  --accent-soft:     rgba(15, 110, 86, 0.08);
+  --danger:          #DC2626;
+  --danger-bg:       #FEF2F2;
+  --shadow-xs:       0 1px 2px rgba(26, 26, 24, 0.04);
+  --shadow-sm:       0 2px 8px rgba(26, 26, 24, 0.06);
+  --shadow-md:       0 4px 20px rgba(26, 26, 24, 0.08);
+  --shadow-lg:       0 12px 40px rgba(26, 26, 24, 0.12);
+  --shadow-xl:       0 24px 64px rgba(26, 26, 24, 0.18);
+  --radius-xs:       6px;
+  --radius-sm:       8px;
+  --radius-md:       12px;
+  --radius-lg:       16px;
+  --radius-xl:       20px;
+  --radius-full:     999px;
+  --font:            'DM Sans', system-ui, sans-serif;
+  --font-display:    'Instrument Serif', Georgia, serif;
+  --transition:      0.15s ease;
+  --nav-height:      56px;
+  --sidebar-width:   280px;
+
+  /* Legacy aliases used in components */
+  --sidebar-dark-bg: var(--sidebar-bg);
+  --muted:           var(--text-muted);
+  --color-text-primary:   var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-muted);
+  --color-border:           var(--border);
+}
+
+/* ── Leaflet overrides ─────────────────────────────────── */
+.leaflet-container {
+  font-family: var(--font);
+  background: var(--bg);
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-md) !important;
+  border: 1px solid var(--border-soft);
+  padding: 0 !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+  line-height: 1.45;
+}
+
+.leaflet-popup-tip {
+  box-shadow: none !important;
+}
+
+.mapPinIcon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ── Shared nav ────────────────────────────────────────── */
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.logo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  border: 1px solid rgba(15, 110, 86, 0.15);
+  text-transform: uppercase;
+}
+
+.avatar--guest {
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+/* ── Animations ────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
