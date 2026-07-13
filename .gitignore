@@ -18,6 +18,9 @@ __pycache__/
 # Temp Local DB
 app.db
 
+# Scraper local cache
+food-scraper-pipeline/scraper/hgw_articles_cache.json
+
 # Editor directories and files
 .vscode/*
 .idea
