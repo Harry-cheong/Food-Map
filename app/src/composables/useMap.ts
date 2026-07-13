@@ -61,6 +61,7 @@ export interface UseMapOptions {
   places: Ref<Place[]>
   selected: Ref<Place | null>
   onMapClick?: (latlng: { lat: number; lng: number }) => void
+  onSelectPlace?: (place: Place) => void
 }
 
 /*
@@ -74,6 +75,7 @@ export function useMap(options: UseMapOptions) {
     places,
     selected,
     onMapClick,
+    onSelectPlace,
   } = options
 
   const mapEl = ref<HTMLElement | null>(null)
@@ -96,7 +98,9 @@ export function useMap(options: UseMapOptions) {
     marker.on('click', (e) => {
       L.DomEvent.stopPropagation(e)
       const current = places.value.find((p) => p.uid === place.uid)
-      if (current) selected.value = current
+      if (!current) return
+      if (onSelectPlace) onSelectPlace(current)
+      else selected.value = current
     })
     markers.set(place.uid, marker)
     if (openPopup) marker.openPopup()

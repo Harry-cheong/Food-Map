@@ -151,7 +151,18 @@ function submit() {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xl);
   position: relative;
+  overflow: hidden;
   animation: slideUp 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--gradient-text);
 }
 
 .close-btn {
@@ -182,21 +193,22 @@ function submit() {
 }
 
 .modal-icon {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   margin: 0 auto 14px;
   border-radius: var(--radius-md);
-  background: var(--accent-bg);
-  color: var(--accent);
+  background: var(--gradient-accent);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
+  box-shadow: var(--shadow-glow);
 }
 
 .modal-title {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 400;
   margin: 0 0 6px;
   letter-spacing: -0.02em;
@@ -309,13 +321,15 @@ function submit() {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: var(--gradient-accent);
   color: white;
   border: none;
+  box-shadow: var(--shadow-glow);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  box-shadow: var(--shadow-glow-lg);
+  transform: translateY(-1px);
 }
 
 .btn-ghost:disabled,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import SidebarFoodDrawer from './SidebarFoodDrawer.vue'
-import { useLocationStore, type PlaceFilter } from '../stores/location'
+import { useLocationStore, type DiscoveredSort, type PlaceFilter } from '../stores/location'
 
 const locStore = useLocationStore()
 const collapsed = ref(false)
@@ -9,11 +9,22 @@ const mobileOpen = ref(false)
 
 const filters: { id: PlaceFilter; label: string }[] = [
   { id: 'personal', label: 'Personal' },
+  { id: 'discovered', label: 'Discovered' },
   { id: 'following', label: 'Following' },
+]
+
+const sortOptions: { id: DiscoveredSort; label: string }[] = [
+  { id: 'recent', label: 'Newest' },
+  { id: 'rating', label: 'Highly rated' },
+  { id: 'reviews', label: 'Most reviewed' },
 ]
 
 function setFilter(id: PlaceFilter) {
   locStore.setFilter(id)
+}
+
+function setSort(id: DiscoveredSort) {
+  locStore.setDiscoveredSort(id)
 }
 
 function syncMobileDefault() {
@@ -71,10 +82,19 @@ defineExpose({ openMobile, closeMobile })
   >
     <div class="sidebar-header">
       <div class="header-text" v-if="!collapsed || mobileOpen">
-        <p class="header-title">Your spots</p>
+        <p class="header-title">
+          {{ locStore.activeFilter === 'discovered' ? 'Discovered' : 'Your spots' }}
+        </p>
         <p class="header-count">
-          {{ locStore.places.length }}
-          {{ locStore.places.length === 1 ? 'place' : 'places' }} saved
+          <template v-if="locStore.activeFilter === 'discovered'">
+            {{ locStore.discoveredPlaces.length }}
+            of {{ locStore.discoveredTotal }}
+            {{ locStore.discoveredTotal === 1 ? 'place' : 'places' }}
+          </template>
+          <template v-else>
+            {{ locStore.places.length }}
+            {{ locStore.places.length === 1 ? 'place' : 'places' }} saved
+          </template>
         </p>
       </div>
 
@@ -106,6 +126,25 @@ defineExpose({ openMobile, closeMobile })
         @click="setFilter(f.id)"
       >
         {{ f.label }}
+      </button>
+    </div>
+
+    <div
+      v-if="locStore.activeFilter === 'discovered' && (!collapsed || mobileOpen)"
+      class="sort-drawer"
+      role="group"
+      aria-label="Sort discovered places"
+    >
+      <span class="sort-label">Sort</span>
+      <button
+        v-for="s in sortOptions"
+        :key="s.id"
+        type="button"
+        class="sort-select"
+        :class="{ 'sort-select--active': locStore.discoveredSort === s.id }"
+        @click="setSort(s.id)"
+      >
+        {{ s.label }}
       </button>
     </div>
 
@@ -153,8 +192,9 @@ defineExpose({ openMobile, closeMobile })
 }
 
 .header-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 400;
   color: var(--text);
   margin: 0 0 2px;
   letter-spacing: -0.01em;
@@ -183,9 +223,10 @@ defineExpose({ openMobile, closeMobile })
 }
 
 .toggle-btn:hover {
-  background: var(--accent-bg);
-  border-color: rgba(15, 110, 86, 0.2);
-  color: var(--accent);
+  background: var(--gradient-accent);
+  border-color: transparent;
+  color: white;
+  box-shadow: var(--shadow-glow);
 }
 
 .sidebar-content {
@@ -218,13 +259,15 @@ defineExpose({ openMobile, closeMobile })
 }
 
 .filter-select--active {
-  background: var(--accent-bg);
-  color: var(--accent);
-  border-color: rgba(15, 110, 86, 0.25);
+  background: var(--gradient-accent);
+  color: white;
+  border-color: transparent;
+  box-shadow: var(--shadow-glow);
 }
 
 .filter-select:hover {
-  border-color: rgba(15, 110, 86, 0.2);
+  border-color: rgba(15, 110, 86, 0.3);
+  color: var(--text);
 }
 
 .filter-drawer {
@@ -233,6 +276,50 @@ defineExpose({ openMobile, closeMobile })
   padding: 10px 12px 8px;
   gap: 6px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.sort-drawer {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  padding: 8px 12px;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+.sort-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.sort-select {
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 5px 10px;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.sort-select--active {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+
+.sort-select:hover {
+  color: var(--text);
 }
 
 @media (max-width: 720px) {

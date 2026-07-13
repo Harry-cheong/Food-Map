@@ -102,3 +102,19 @@
   `clearPlaces`
 - API client: `apiRequest` + token getter from the auth store; `api/auth` & `api/places` wrap
   endpoints; Vite proxies `/api` → `:8000`; `useApi` removed; auth store owns `signIn` / `signUp`
+
+## 2026-07-13
+**full-stack** | Goal: surface the scraped Discovered feed in the app
+
+- Backend: paginated `GET /discovered` (no auth) with search (`q`) and `sort` by
+  recent / rating / reviews; adds `DiscoveredPlace` model + `DiscoveredPage` /
+  `DiscoveredPlaceResponse` schemas
+- Discovered filter: new sidebar tab fetches 15 at a time, loads more on scroll
+  (IntersectionObserver); sort row (Newest / Highly rated / Most reviewed);
+  search re-queries the API (debounced)
+- Detail card shows the full discovered payload (names, address, category, rating,
+  status, source link, confirmed time); hidden on very small viewports and trimmed
+  of source address / article / place ID / coords
+- Map markers + selection now follow `activeFilter` via `mapPlaces` in the store
+- README: dropped stale Instagram webhook / ngrok steps; documented the current
+  `app/` + `food-scraper-pipeline/` layout and PostGIS / backend / frontend setup

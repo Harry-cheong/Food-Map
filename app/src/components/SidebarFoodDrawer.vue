@@ -1,8 +1,54 @@
 <script lang="ts" setup>
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { useLocationStore } from '../stores/location'
 import { categoryChipStyle } from '../constants/categories'
+import type { DiscoveredPlace } from '../types/discovered'
 
 const locStore = useLocationStore()
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
+function bindObserver(el: HTMLElement | null) {
+  observer?.disconnect()
+  observer = null
+  if (!el) return
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return
+      if (locStore.activeFilter !== 'discovered') return
+      if (!locStore.discoveredHasMore || locStore.isLoadingDiscovered) return
+      void locStore.loadDiscovered()
+    },
+    { root: el.closest('.sidebar-content'), rootMargin: '80px', threshold: 0 },
+  )
+  observer.observe(el)
+}
+
+watch(sentinel, (el) => bindObserver(el), { flush: 'post' })
+
+watch(
+  () => locStore.activeFilter,
+  () => {
+    if (sentinel.value) bindObserver(sentinel.value)
+  },
+)
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+})
+
+function formatRating(place: DiscoveredPlace): string | null {
+  if (place.rating == null) return null
+  const count =
+    place.user_rating_count != null ? ` · ${place.user_rating_count} reviews` : ''
+  return `★ ${place.rating.toFixed(1)}${count}`
+}
+
+function formatStatus(status: string | null): string | null {
+  if (!status) return null
+  return status.replace(/_/g, ' ').toLowerCase()
+}
 </script>
 
 <template>
@@ -17,6 +63,106 @@ const locStore = useLocationStore()
     <button type="button" class="empty-action" @click="locStore.setFilter('personal')">
       Back to Personal
     </button>
+  </div>
+
+  <div
+    v-else-if="locStore.activeFilter === 'discovered'"
+    class="discovered-panel"
+  >
+    <div
+      v-if="locStore.discoveredPlaces.length === 0 && locStore.isLoadingDiscovered"
+      class="empty-state"
+    >
+      <div class="empty-icon loading-spin">
+        <i class="mdi mdi-loading"></i>
+      </div>
+      <p class="empty-title">Loading discoveries…</p>
+    </div>
+
+    <div
+      v-else-if="locStore.discoveredPlaces.length === 0 && locStore.searchQuery.trim()"
+      class="empty-state"
+    >
+      <div class="empty-icon">
+        <i class="mdi mdi-magnify"></i>
+      </div>
+      <p class="empty-title">No matches</p>
+      <p class="empty-hint">
+        Nothing discovered matches “{{ locStore.searchQuery.trim() }}”.
+      </p>
+      <button type="button" class="empty-action" @click="locStore.setSearchQuery('')">
+        Clear search
+      </button>
+    </div>
+
+    <div
+      v-else-if="locStore.discoveredPlaces.length === 0"
+      class="empty-state"
+    >
+      <div class="empty-icon">
+        <i class="mdi mdi-compass-outline"></i>
+      </div>
+      <p class="empty-title">No discoveries yet</p>
+      <p class="empty-hint">Run the scraper pipeline to confirm HungryGoWhere spots.</p>
+    </div>
+
+    <TransitionGroup v-else name="list" tag="div" class="place-list">
+      <div
+        v-for="place in locStore.discoveredPlaces"
+        :key="place.id"
+        class="sidebar-item"
+        :class="{
+          'sidebar-item--selected': locStore.selectedDiscovered?.id === place.id,
+        }"
+        @click="locStore.selectDiscovered(place)"
+      >
+        <div class="sidebar-label">
+          <div class="icon-wrap">
+            <i class="mdi mdi-compass-outline"></i>
+          </div>
+          <div class="sidebar-info-box">
+            <p class="sidebar-name">{{ place.google_name || place.restaurant_name }}</p>
+            <div class="sidebar-location">
+              <i class="mdi mdi-map-marker-outline"></i>
+              {{ place.formatted_address }}
+            </div>
+            <div class="sidebar-meta">
+              <span
+                v-if="place.source_category"
+                class="sidebar-category"
+                :style="{
+                  backgroundColor: categoryChipStyle(place.source_category).bg,
+                  color: categoryChipStyle(place.source_category).color,
+                }"
+              >
+                {{ place.source_category }}
+              </span>
+              <span v-if="formatRating(place)" class="sidebar-rating">
+                {{ formatRating(place) }}
+              </span>
+              <span v-if="formatStatus(place.business_status)" class="sidebar-status">
+                {{ formatStatus(place.business_status) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </TransitionGroup>
+
+    <div
+      v-if="locStore.discoveredPlaces.length > 0"
+      ref="sentinel"
+      class="load-more"
+      aria-hidden="true"
+    >
+      <span v-if="locStore.isLoadingDiscovered" class="load-more-text">
+        <i class="mdi mdi-loading loading-spin"></i>
+        Loading more…
+      </span>
+      <span v-else-if="!locStore.discoveredHasMore" class="load-more-text muted">
+        All {{ locStore.discoveredTotal }} loaded
+      </span>
+    </div>
   </div>
 
   <div
@@ -100,16 +246,17 @@ const locStore = useLocationStore()
 }
 
 .empty-icon {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   border-radius: var(--radius-lg);
-  background: var(--accent-bg);
-  color: var(--accent);
+  background: var(--gradient-accent);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28px;
   margin-bottom: 16px;
+  box-shadow: var(--shadow-glow);
 }
 
 .empty-title {
@@ -140,8 +287,16 @@ const locStore = useLocationStore()
 }
 
 .empty-action:hover {
-  background: var(--accent-bg);
-  border-color: rgba(15, 110, 86, 0.25);
+  background: var(--gradient-accent);
+  border-color: transparent;
+  color: white;
+  box-shadow: var(--shadow-glow);
+}
+
+.discovered-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 .place-list {
@@ -179,7 +334,7 @@ const locStore = useLocationStore()
   border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: var(--surface);
-  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition), transform var(--transition);
 }
 
 .sidebar-item--selected {
@@ -188,9 +343,21 @@ const locStore = useLocationStore()
   box-shadow: var(--shadow-xs);
 }
 
+.sidebar-item--selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: var(--gradient-accent);
+}
+
 .sidebar-item:hover {
   border-color: var(--border);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .sidebar-item--selected:hover {
@@ -215,11 +382,13 @@ const locStore = useLocationStore()
   justify-content: center;
   font-size: 16px;
   flex-shrink: 0;
+  transition: background var(--transition), color var(--transition), box-shadow var(--transition);
 }
 
 .sidebar-item--selected .icon-wrap {
-  background: rgba(15, 110, 86, 0.12);
-  color: var(--accent);
+  background: var(--gradient-accent);
+  color: white;
+  box-shadow: var(--shadow-glow);
 }
 
 .sidebar-info-box {
@@ -242,6 +411,17 @@ const locStore = useLocationStore()
 .sidebar-location {
   font-size: 11px;
   color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sidebar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .sidebar-category {
@@ -251,6 +431,13 @@ const locStore = useLocationStore()
   width: fit-content;
   border-radius: var(--radius-full);
   letter-spacing: 0.01em;
+}
+
+.sidebar-rating,
+.sidebar-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: capitalize;
 }
 
 .sidebar-close {
@@ -279,6 +466,35 @@ const locStore = useLocationStore()
 
 .sidebar-item:hover .sidebar-close {
   opacity: 1;
+}
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 14px 8px 8px;
+  min-height: 28px;
+}
+
+.load-more-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.load-more-text.muted {
+  color: var(--text-muted);
+}
+
+.loading-spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .action-error {

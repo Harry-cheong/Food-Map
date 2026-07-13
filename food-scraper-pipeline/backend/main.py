@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Response
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
+from typing import Literal
 import models, schemas
 import auth
 import jwt
 from database import SessionLocal
 import datetime
+
 
 app = FastAPI()
 app.add_middleware(
@@ -105,3 +107,53 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user_id: int = Depe
 @app.get("/items/me", response_model=list[schemas.ItemResponse])
 def get_item(db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
     return db.query(models.Item).filter(models.Item.submitted_by_user_id == user_id).all()
+
+@app.get("/discovered", response_model=schemas.DiscoveredPage)
+def list_discovered(
+    limit: int = Query(15, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    q: str | None = Query(None, max_length=200),
+    sort: Literal["recent", "rating", "reviews"] = Query("recent"),
+    db: Session = Depends(get_db),
+):
+    """Paginated discovery feed from the HGW → Places scraper (no auth required)."""
+    query = db.query(models.DiscoveredPlace)
+
+    if q and (term := q.strip()):
+        pattern = f"%{term}%"
+        query = query.filter(
+            or_(
+                models.DiscoveredPlace.restaurant_name.ilike(pattern),
+                models.DiscoveredPlace.google_name.ilike(pattern),
+                models.DiscoveredPlace.formatted_address.ilike(pattern),
+                models.DiscoveredPlace.source_title.ilike(pattern),
+                models.DiscoveredPlace.source_category.ilike(pattern),
+                models.DiscoveredPlace.source_address.ilike(pattern),
+            )
+        )
+
+    if sort == "rating":
+        order = (
+            models.DiscoveredPlace.rating.desc().nulls_last(),
+            models.DiscoveredPlace.user_rating_count.desc().nulls_last(),
+            models.DiscoveredPlace.confirmed_at.desc(),
+        )
+    elif sort == "reviews":
+        order = (
+            models.DiscoveredPlace.user_rating_count.desc().nulls_last(),
+            models.DiscoveredPlace.rating.desc().nulls_last(),
+            models.DiscoveredPlace.confirmed_at.desc(),
+        )
+    else:
+        order = (models.DiscoveredPlace.confirmed_at.desc(),)
+
+    total = query.with_entities(func.count(models.DiscoveredPlace.id)).scalar() or 0
+    items = query.order_by(*order).offset(offset).limit(limit).all()
+
+    return schemas.DiscoveredPage(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(items) < total,
+    )

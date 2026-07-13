@@ -30,3 +30,31 @@ class User(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     token_type: str = "bearer"
+
+
+class DiscoveredPlaceResponse(BaseModel):
+    id: int
+    source_url: str
+    source_title: str | None = None
+    source_category: str | None = None
+    restaurant_name: str
+    source_address: str | None = None
+    google_place_id: str
+    google_name: str
+    formatted_address: str
+    lat: float
+    lng: float
+    rating: float | None = None
+    user_rating_count: int | None = None
+    business_status: str | None = None
+    confirmed_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DiscoveredPage(BaseModel):
+    items: list[DiscoveredPlaceResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool

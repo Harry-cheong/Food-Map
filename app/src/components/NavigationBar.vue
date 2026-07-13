@@ -108,7 +108,11 @@ function switchToLogin() {
       <input
         type="search"
         class="search-input"
-        placeholder="Search your saved spots…"
+        :placeholder="
+          locStore.activeFilter === 'discovered'
+            ? 'Search discovered spots…'
+            : 'Search your saved spots…'
+        "
         :value="locStore.searchQuery"
         @input="locStore.setSearchQuery(($event.target as HTMLInputElement).value)"
       />
@@ -235,7 +239,20 @@ function switchToLogin() {
   gap: 16px;
   padding: 0 20px;
   flex-shrink: 0;
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 700;
+}
+
+.nav::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--gradient-text);
+  opacity: 0.55;
 }
 
 .nav-right {
@@ -273,6 +290,10 @@ function switchToLogin() {
   color: var(--text);
   outline: none;
   transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.search-input:hover {
+  border-color: rgba(15, 110, 86, 0.3);
 }
 
 .search-input:focus {
@@ -324,18 +345,19 @@ function switchToLogin() {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: var(--gradient-accent);
   color: white;
   border: none;
+  box-shadow: var(--shadow-glow);
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-glow-lg);
+  transform: translateY(-1px);
 }
 
 .btn-primary:active {
-  transform: scale(0.98);
+  transform: scale(0.98) translateY(0);
 }
 
 .btn-ghost {
@@ -391,7 +413,18 @@ function switchToLogin() {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xl);
   position: relative;
+  overflow: hidden;
   animation: slideUp 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.login-popup::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--gradient-text);
 }
 
 .close-btn {
@@ -423,21 +456,22 @@ function switchToLogin() {
 }
 
 .login-icon {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   margin: 0 auto 16px;
   border-radius: var(--radius-md);
-  background: var(--accent-bg);
-  color: var(--accent);
+  background: var(--gradient-accent);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
+  box-shadow: var(--shadow-glow);
 }
 
 .login-title {
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 400;
   margin: 0 0 6px;
   letter-spacing: -0.02em;
@@ -484,7 +518,7 @@ function switchToLogin() {
 
 .submit-btn {
   width: 100%;
-  background: var(--accent);
+  background: var(--gradient-accent);
   border: none;
   padding: 13px 20px;
   border-radius: var(--radius-sm);
@@ -492,17 +526,18 @@ function switchToLogin() {
   font-weight: 600;
   color: white;
   cursor: pointer;
-  transition: background var(--transition), transform var(--transition), box-shadow var(--transition), opacity var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
   margin-top: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  box-shadow: var(--shadow-glow);
 }
 
 .submit-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-glow-lg);
+  transform: translateY(-1px);
 }
 
 .submit-btn:active:not(:disabled) {
