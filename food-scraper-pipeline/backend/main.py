@@ -60,6 +60,13 @@ def generate_token(credientials: schemas.User, db: Session = Depends(get_db)):
 
 @app.post("/newuser", response_model=schemas.MessageResponse)
 def create_user(user: schemas.User, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.username == user.username).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already taken",
+        )
+
     db_item = models.User(username=user.username, hashed_password=auth.hash_password(user.password))
     db.add(db_item)
     db.commit()

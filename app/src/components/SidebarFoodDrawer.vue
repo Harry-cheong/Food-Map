@@ -1,27 +1,39 @@
 <script lang="ts" setup>
 import { useLocationStore } from '../stores/location'
+import { categoryChipStyle } from '../constants/categories'
 
 const locStore = useLocationStore()
-
-const categoryStyle: Record<string, { bg: string; color: string }> = {
-  Indian:    { bg: '#F3E8FF', color: '#7E22CE' },
-  Chinese:   { bg: '#FEE2E2', color: '#B91C1C' },
-  Japanese:  { bg: '#FCE7F3', color: '#BE185D' },
-  Western:   { bg: '#DBEAFE', color: '#1D4ED8' },
-  Malay:     { bg: '#D1FAE5', color: '#047857' },
-  Korean:    { bg: '#EDE9FE', color: '#6D28D9' },
-  Thai:      { bg: '#CCFBF1', color: '#0F766E' },
-  Cafe:      { bg: '#F5F5F4', color: '#57534E' },
-  'Fast Food': { bg: '#FFEDD5', color: '#C2410C' },
-}
-
-function categoryColors(category: string) {
-  return categoryStyle[category] ?? { bg: '#F3F4F6', color: '#4B5563' }
-}
 </script>
 
 <template>
-  <div v-if="locStore.places.length === 0" class="empty-state">
+  <div v-if="locStore.activeFilter === 'following'" class="empty-state">
+    <div class="empty-icon">
+      <i class="mdi mdi-account-group-outline"></i>
+    </div>
+    <p class="empty-title">Following is coming soon</p>
+    <p class="empty-hint">
+      You’ll be able to see spots saved by people you follow. For now, stick with your personal list.
+    </p>
+    <button type="button" class="empty-action" @click="locStore.setFilter('personal')">
+      Back to Personal
+    </button>
+  </div>
+
+  <div
+    v-else-if="locStore.filteredPlaces.length === 0 && locStore.searchQuery.trim()"
+    class="empty-state"
+  >
+    <div class="empty-icon">
+      <i class="mdi mdi-magnify"></i>
+    </div>
+    <p class="empty-title">No matches</p>
+    <p class="empty-hint">Nothing in your list matches “{{ locStore.searchQuery.trim() }}”.</p>
+    <button type="button" class="empty-action" @click="locStore.setSearchQuery('')">
+      Clear search
+    </button>
+  </div>
+
+  <div v-else-if="locStore.places.length === 0" class="empty-state">
     <div class="empty-icon">
       <i class="mdi mdi-map-marker-plus-outline"></i>
     </div>
@@ -29,18 +41,20 @@ function categoryColors(category: string) {
     <p class="empty-hint">Click anywhere on the map to pin a food spot in Singapore.</p>
   </div>
 
-  <TransitionGroup name="list" tag="div" class="place-list">
+  <TransitionGroup v-else name="list" tag="div" class="place-list">
     <div
-      v-for="place in locStore.places"
-      :key="String(place.id)"
+      v-for="place in locStore.filteredPlaces"
+      :key="place.uid"
       class="sidebar-item"
-      :class="{ 'sidebar-item--selected': locStore.selected === place }"
+      :class="{ 'sidebar-item--selected': locStore.selected?.uid === place.uid }"
       @click="locStore.selectPlace(place)"
     >
       <button
         class="sidebar-close"
-        @click.stop="locStore.deletePlace(place)"
+        type="button"
         aria-label="Remove place"
+        :disabled="locStore.isDeleting"
+        @click.stop="locStore.deletePlace(place)"
       >
         <i class="mdi mdi-close"></i>
       </button>
@@ -58,8 +72,8 @@ function categoryColors(category: string) {
           <span
             class="sidebar-category"
             :style="{
-              backgroundColor: categoryColors(place.category).bg,
-              color: categoryColors(place.category).color,
+              backgroundColor: categoryChipStyle(place.category).bg,
+              color: categoryChipStyle(place.category).color,
             }"
           >
             {{ place.category }}
@@ -68,6 +82,11 @@ function categoryColors(category: string) {
       </div>
     </div>
   </TransitionGroup>
+
+  <p v-if="locStore.actionError" class="action-error">
+    <i class="mdi mdi-alert-circle-outline"></i>
+    {{ locStore.actionError }}
+  </p>
 </template>
 
 <style scoped>
@@ -106,6 +125,23 @@ function categoryColors(category: string) {
   margin: 0;
   line-height: 1.55;
   max-width: 200px;
+}
+
+.empty-action {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.empty-action:hover {
+  background: var(--accent-bg);
+  border-color: rgba(15, 110, 86, 0.25);
 }
 
 .place-list {
@@ -205,7 +241,7 @@ function categoryColors(category: string) {
 
 .sidebar-location {
   font-size: 11px;
-  color: var(--text-secondary)
+  color: var(--text-secondary);
 }
 
 .sidebar-category {
@@ -243,5 +279,18 @@ function categoryColors(category: string) {
 
 .sidebar-item:hover .sidebar-close {
   opacity: 1;
+}
+
+.action-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 4px 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
 }
 </style>
