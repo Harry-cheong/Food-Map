@@ -6,10 +6,8 @@ from sqlalchemy.orm import Session
 import models, schemas
 import auth
 import jwt
-from database import engine, SessionLocal
+from database import SessionLocal
 import datetime
-
-models.Base.metadata.create_all(bind=engine)  # creates tables on startup
 
 app = FastAPI()
 app.add_middleware(
@@ -24,30 +22,6 @@ security = HTTPBearer()
 # Make up a custom secure token. It must match what you type in the Meta Dashboard.
 VERIFY_TOKEN = "very-secure-food-token"
 
-# 1. Meta verification endpoint (GET)
-@app.get("/webhook")
-async def verify_webhook(
-    hub_mode: str = Query(None, alias="hub.mode"),
-    hub_verify_token: str = Query(None, alias="hub.verify_token"),
-    hub_challenge: int = Query(None, alias="hub.challenge")
-):
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        print("Webhook verified successfully!")
-        # You must return the raw integer challenge back to Meta
-        return Response(content=str(hub_challenge), media_type="text/plain")
-    
-    return Response(status_code=status.HTTP_403_FORBIDDEN)
-
-# 2. Data payload endpoint (POST)
-@app.post("/webhook")
-async def receive_webhook_data(payload: Dict[str, Any]):
-    # Meta sends data asynchronously. Print it out to see the structure.
-    print("New Instagram Event Received:", payload)
-    
-    # Always acknowledge receipt with a 200 OK immediately
-    return {"status": "success"}
-
-
 def get_db():
     db = SessionLocal()
     try:
@@ -59,10 +33,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     token = credentials.credentials
     try:
         payload = jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
-        user_id: int = payload.get("sub")
+        user_id = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-        return user_id
+        return int(user_id)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
@@ -94,8 +68,13 @@ def create_user(user: schemas.User, db: Session = Depends(get_db)):
 
 @app.post("/items", response_model=schemas.ItemResponse)
 def create_item(item: schemas.ItemBase, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
-    print(item)
-    db_item = models.Item(**item.model_dump(), submitted_by_user_id=user_id, created_at=datetime.datetime.now()) # item.model_dump() converts the Pydantic schema object into a plain Python dict, then ** unpacks that dict as keyword arguments into the SQLAlchemy constructor
+    payload = item.model_dump()
+    payload["named_address"] = payload.pop("location")
+    db_item = models.Item(
+        **payload,
+        submitted_by_user_id=user_id,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+    )
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
@@ -117,5 +96,5 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user_id: int = Depe
     return {"message": "Item deleted successfully"}
 
 @app.get("/items/me", response_model=list[schemas.ItemResponse])
-def get_item(db: Session = Depends(get_db), user_id: str = Depends(get_current_user)):
-    return db.query(models.Item).filter(models.Item.submitted_by_user_id == user_id).all() # returns a list
+def get_item(db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    return db.query(models.Item).filter(models.Item.submitted_by_user_id == user_id).all()
