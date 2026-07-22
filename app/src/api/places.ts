@@ -1,5 +1,6 @@
 import { apiRequest } from './client'
 import type { DiscoveredPage } from '../types/discovered'
+import type { PlaceSearchPage } from '../types/placesSearch'
 import type { ItemCreate, ItemResponse } from '../types/place'
 
 /*
@@ -32,6 +33,14 @@ export function fetchDiscovered(params: {
   if (q) search.set('q', q)
 
   return apiRequest<DiscoveredPage>(`/discovered?${search.toString()}`, {
+    auth: false,
+  })
+}
+
+export function searchPlaces(q: string) {
+  const search = new URLSearchParams()
+  search.set('q', q.trim())
+  return apiRequest<PlaceSearchPage>(`/places/search?${search.toString()}`, {
     auth: false,
   })
 }

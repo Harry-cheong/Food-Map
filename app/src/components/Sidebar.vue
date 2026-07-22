@@ -116,6 +116,30 @@ defineExpose({ openMobile, closeMobile })
       </button>
     </div>
 
+    <div class="search-container" v-if="!collapsed || mobileOpen">
+      <i class="mdi mdi-magnify search-icon"></i>
+      <input
+        type="search"
+        class="search-input"
+        :placeholder="
+          locStore.activeFilter === 'discovered'
+            ? 'Search discovered spots…'
+            : 'Search your saved spots…'
+        "
+        :value="locStore.searchQuery"
+        @input="locStore.setSearchQuery(($event.target as HTMLInputElement).value)"
+      />
+      <button
+        v-if="locStore.searchQuery"
+        type="button"
+        class="search-clear"
+        aria-label="Clear search"
+        @click="locStore.setSearchQuery('')"
+      >
+        <i class="mdi mdi-close"></i>
+      </button>
+    </div>
+
     <div class="filter-drawer" v-if="!collapsed || mobileOpen">
       <button
         v-for="f in filters"
@@ -243,6 +267,76 @@ defineExpose({ openMobile, closeMobile })
 .sidebar-content::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: var(--radius-full);
+}
+
+.search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px 0;
+  flex-shrink: 0;
+}
+
+.search-icon {
+  position: absolute;
+  left: 24px;
+  color: var(--text-muted);
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 34px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.search-input:hover {
+  border-color: rgba(15, 110, 86, 0.3);
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-input::placeholder {
+  color: var(--text-hint);
+}
+
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.search-clear {
+  position: absolute;
+  right: 20px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.search-clear:hover {
+  background: var(--border-soft);
+  color: var(--text);
 }
 
 .filter-select {

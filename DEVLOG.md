@@ -118,3 +118,25 @@
 - Map markers + selection now follow `activeFilter` via `mapPlaces` in the store
 - README: dropped stale Instagram webhook / ngrok steps; documented the current
   `app/` + `food-scraper-pipeline/` layout and PostGIS / backend / frontend setup
+
+## 2026-07-22
+**full-stack** | Goal: let users search restaurants via Google Places from the header
+
+- Backend: `GET /places/search?q=` proxies Places Text Search (Singapore /
+  restaurant-biased) using `GOOGLE_PLACES_API_KEY`; returns name, address, coords,
+  rating, and status without exposing the key to the browser
+- Header search in `NavigationBar`: debounced query, dropdown results, Esc /
+  click-outside to dismiss; selecting a hit overlays markers on the map
+- Focus card for search results with **Save to my spots** → `POST /items`
+  (opens auth if signed out); saved pin lands in Personal and clears the search overlay
+- Sidebar Personal / Discovered search unchanged; header owns live Google lookup
+
+## 2026-07-19
+**frontend** | Goal: show the user's live location on the map
+
+- Opt-in "Locate me" control on the map: first tap requests permission via
+  `watchPosition`, places a blue-dot + accuracy circle, and flies once to you
+- While tracking, the marker updates as you move without auto-panning; tapping
+  again recenters only
+- `useUserLocation` owns geolocation state; `useMap` keeps the user marker
+  separate from place pins; works for guests and signed-in users

@@ -58,3 +58,19 @@ class DiscoveredPage(BaseModel):
     limit: int
     offset: int
     has_more: bool
+
+
+class PlaceSearchResult(BaseModel):
+    google_place_id: str
+    name: str
+    formatted_address: str
+    lat: float
+    lng: float
+    rating: float | None = None
+    user_rating_count: int | None = None
+    business_status: str | None = None
+
+
+class PlaceSearchPage(BaseModel):
+    items: list[PlaceSearchResult]
+    query: str

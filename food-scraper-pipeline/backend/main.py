@@ -9,6 +9,7 @@ import auth
 import jwt
 from database import SessionLocal
 import datetime
+import places_search
 
 
 app = FastAPI()
@@ -156,4 +157,38 @@ def list_discovered(
         limit=limit,
         offset=offset,
         has_more=offset + len(items) < total,
+    )
+
+@app.get("/places/search", response_model=schemas.PlaceSearchPage)
+def search_places(
+    q: str = Query(..., min_length=2, max_length=200),
+):
+    """Live Google Places restaurant search (Singapore-biased). No auth required."""
+    term = q.strip()
+    if len(term) < 2:
+        raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
+
+    try:
+        hits = places_search.search_restaurants(term)
+    except places_search.PlacesSearchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return schemas.PlaceSearchPage(
+        items=[
+            schemas.PlaceSearchResult(
+                google_place_id=hit.google_place_id,
+                name=hit.name,
+                formatted_address=hit.formatted_address,
+                lat=hit.lat,
+                lng=hit.lng,
+                rating=hit.rating,
+                user_rating_count=hit.user_rating_count,
+                business_status=hit.business_status,
+            )
+            for hit in hits
+        ],
+        query=term,
     )

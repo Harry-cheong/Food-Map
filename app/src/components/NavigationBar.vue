@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useLocationStore } from '../stores/location'
+import type { PlaceSearchResult } from '../types/placesSearch'
 
 defineProps<{
   showLogin?: boolean
@@ -15,10 +16,71 @@ const formError = ref('')
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const searchOpen = ref(false)
+const searchRoot = ref<HTMLElement | null>(null)
 
 const avatarInitial = computed(() =>
   auth.user?.username?.charAt(0).toUpperCase() ?? '?',
 )
+
+const showSearchDropdown = computed(() => {
+  if (!searchOpen.value) return false
+  const q = locStore.placesSearchQuery.trim()
+  if (q.length < 2) return false
+  return (
+    locStore.isSearchingPlaces ||
+    locStore.placesSearchError != null ||
+    locStore.placesSearchResults.length > 0 ||
+    q.length >= 2
+  )
+})
+
+function onPlacesSearchInput(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  locStore.setPlacesSearchQuery(value)
+  searchOpen.value = true
+}
+
+function clearHeaderSearch() {
+  locStore.clearPlacesSearch()
+  locStore.clearSelection()
+  searchOpen.value = false
+}
+
+function pickSearchResult(place: PlaceSearchResult) {
+  locStore.selectSearchResult(place)
+  searchOpen.value = false
+}
+
+function formatRating(place: PlaceSearchResult): string | null {
+  if (place.rating == null) return null
+  const reviews =
+    place.user_rating_count != null ? ` (${place.user_rating_count})` : ''
+  return `★ ${place.rating.toFixed(1)}${reviews}`
+}
+
+function onDocumentPointerDown(event: PointerEvent) {
+  const root = searchRoot.value
+  if (!root) return
+  if (event.target instanceof Node && !root.contains(event.target)) {
+    searchOpen.value = false
+  }
+}
+
+function onSearchKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    searchOpen.value = false
+    ;(event.target as HTMLInputElement).blur()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+})
 
 const isRegister = computed(() => auth.authMode === 'register')
 const modalTitle = computed(() => (isRegister.value ? 'Join FoodMap' : 'Welcome back'))
@@ -103,28 +165,66 @@ function switchToLogin() {
       FoodMap
     </a>
 
-    <div class="search-container">
-      <i class="mdi mdi-magnify search-icon"></i>
+    <div ref="searchRoot" class="nav-search">
+      <i class="mdi mdi-magnify nav-search-icon" aria-hidden="true"></i>
       <input
+        class="nav-search-input"
         type="search"
-        class="search-input"
-        :placeholder="
-          locStore.activeFilter === 'discovered'
-            ? 'Search discovered spots…'
-            : 'Search your saved spots…'
-        "
-        :value="locStore.searchQuery"
-        @input="locStore.setSearchQuery(($event.target as HTMLInputElement).value)"
+        placeholder="Search restaurants…"
+        autocomplete="off"
+        :value="locStore.placesSearchQuery"
+        aria-label="Search restaurants"
+        aria-autocomplete="list"
+        :aria-expanded="showSearchDropdown"
+        @input="onPlacesSearchInput"
+        @focus="searchOpen = true"
+        @keydown="onSearchKeydown"
       />
       <button
-        v-if="locStore.searchQuery"
+        v-if="locStore.placesSearchQuery"
+        class="nav-search-clear"
         type="button"
-        class="search-clear"
         aria-label="Clear search"
-        @click="locStore.setSearchQuery('')"
+        @click="clearHeaderSearch"
       >
         <i class="mdi mdi-close"></i>
       </button>
+
+      <div v-if="showSearchDropdown" class="nav-search-dropdown" role="listbox">
+        <p v-if="locStore.isSearchingPlaces" class="nav-search-status">
+          <i class="mdi mdi-loading mdi-spin"></i>
+          Searching…
+        </p>
+        <p v-else-if="locStore.placesSearchError" class="nav-search-status nav-search-status--error">
+          {{ locStore.placesSearchError }}
+        </p>
+        <p
+          v-else-if="locStore.placesSearchResults.length === 0"
+          class="nav-search-status"
+        >
+          No restaurants found for “{{ locStore.placesSearchQuery.trim() }}”.
+        </p>
+        <button
+          v-for="place in locStore.placesSearchResults"
+          :key="place.google_place_id"
+          class="nav-search-item"
+          type="button"
+          role="option"
+          :class="{
+            'nav-search-item--selected':
+              locStore.selectedSearchResult?.google_place_id === place.google_place_id,
+          }"
+          @click="pickSearchResult(place)"
+        >
+          <span class="nav-search-item-name">{{ place.name }}</span>
+          <span class="nav-search-item-meta">
+            <span v-if="formatRating(place)" class="nav-search-item-rating">
+              {{ formatRating(place) }}
+            </span>
+            <span class="nav-search-item-address">{{ place.formatted_address }}</span>
+          </span>
+        </button>
+      </div>
     </div>
 
     <div class="nav-right">
@@ -255,6 +355,143 @@ function switchToLogin() {
   opacity: 0.55;
 }
 
+.nav-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.nav-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.nav-search-icon {
+  color: var(--text-muted);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.nav-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.nav-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.nav-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.nav-search-clear:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.nav-search-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 800;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+}
+
+.nav-search-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.nav-search-status--error {
+  color: var(--danger);
+}
+
+.nav-search-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.nav-search-item:hover,
+.nav-search-item--selected {
+  background: var(--bg);
+}
+
+.nav-search-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.nav-search-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.nav-search-item-rating {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.nav-search-item-address {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 .nav-right {
   margin-left: auto;
   display: flex;
@@ -263,67 +500,14 @@ function switchToLogin() {
   flex-shrink: 0;
 }
 
-.search-container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  max-width: 360px;
-}
+@media (max-width: 720px) {
+  .nav-search {
+    max-width: none;
+  }
 
-.search-icon {
-  position: absolute;
-  left: 12px;
-  color: var(--text-muted);
-  font-size: 18px;
-  pointer-events: none;
-}
-
-.search-input {
-  width: 100%;
-  height: 38px;
-  padding: 0 36px 0 38px;
-  font-size: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: var(--bg);
-  color: var(--text);
-  outline: none;
-  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
-}
-
-.search-input:hover {
-  border-color: rgba(15, 110, 86, 0.3);
-}
-
-.search-input:focus {
-  border-color: var(--accent);
-  background: var(--surface);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.search-input::placeholder {
-  color: var(--text-hint);
-}
-
-.search-clear {
-  position: absolute;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  border-radius: var(--radius-full);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.search-clear:hover {
-  background: var(--border-soft);
-  color: var(--text);
+  .nav-greeting {
+    display: none;
+  }
 }
 
 .nav-greeting {
@@ -573,10 +757,6 @@ function switchToLogin() {
 @media (max-width: 720px) {
   .nav-greeting {
     display: none;
-  }
-
-  .search-container {
-    max-width: none;
   }
 }
 </style>

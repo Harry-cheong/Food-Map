@@ -161,6 +161,33 @@ input {
   }
 }
 
+.userLocationIcon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.user-location {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.user-location-dot {
+  width: 14px;
+  height: 14px;
+  background: #3182CE;
+  border: 2.5px solid white;
+  border-radius: 50%;
+  box-shadow: 0 1px 6px rgba(43, 108, 176, 0.55);
+}
+
+.user-accuracy-circle {
+  pointer-events: none;
+}
+
 .leaflet-control-zoom {
   border: none !important;
   box-shadow: var(--shadow-sm) !important;

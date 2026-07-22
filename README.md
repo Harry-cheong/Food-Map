@@ -25,7 +25,7 @@ DB_HOST=localhost
 DB_PORT=5432
 ```
 
-(`GOOGLE_PLACES_API_KEY` is only required for the scraper.)
+(`GOOGLE_PLACES_API_KEY` is required for the HungryGoWhere scraper and for live restaurant search via `GET /places/search`.)
 
 ## Local setup
 

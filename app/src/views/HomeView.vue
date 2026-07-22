@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import type { LatLngTuple } from 'leaflet'
 import NavigationBar from '../components/NavigationBar.vue'
 import Sidebar from '../components/Sidebar.vue'
@@ -7,6 +7,7 @@ import PinLabelModal from '../components/PinLabelModal.vue'
 import { useAuthStore } from '../stores/auth'
 import { useLocationStore } from '../stores/location'
 import { useMap } from '../composables/useMap'
+import { useUserLocation } from '../composables/useUserLocation'
 import { reverseGeocode } from '../composables/useGeocode'
 import { categoryAccent } from '../constants/categories'
 import { storeToRefs } from 'pinia'
@@ -34,6 +35,7 @@ const resolvingAddress = ref(false)
 
 function onMapClick(latlng: { lat: number; lng: number }) {
   if (locStore.activeFilter === 'discovered') return
+  if (locStore.hasPlacesSearchOverlay) return
 
   if (!auth.isLoggedIn) {
     auth.openLogin()
@@ -56,14 +58,42 @@ function onMapClick(latlng: { lat: number; lng: number }) {
   })
 }
 
-const { mapEl, init, reload } = useMap({
+const {
+  position: userPosition,
+  isTracking,
+  isLocating,
+  error: locationError,
+  start: startUserLocation,
+} = useUserLocation()
+
+const { mapEl, init, reload, focusUserLocation } = useMap({
   center: props.center,
   zoom: props.zoom,
   places: mapPlaces,
   selected,
+  userPosition,
   onMapClick,
   onSelectPlace: (place) => locStore.selectPlace(place),
 })
+
+const locateTitle = computed(() => {
+  if (locationError.value === 'denied') return 'Location permission denied'
+  if (locationError.value === 'timeout') return 'Location timed out — try again'
+  if (locationError.value === 'unavailable') return 'Location unavailable'
+  if (isLocating.value) return 'Finding your location…'
+  if (isTracking.value) return 'Center on my location'
+  return 'Show my location'
+})
+
+async function onLocateClick() {
+  if (isTracking.value && userPosition.value) {
+    focusUserLocation()
+    return
+  }
+
+  const pos = await startUserLocation()
+  if (pos) focusUserLocation()
+}
 
 async function saveLabeledPin(payload: { name: string; category: string; description: string }) {
   if (!pendingCoord.value) return
@@ -89,6 +119,10 @@ async function saveLabeledPin(payload: { name: string; category: string; descrip
   pendingCoord.value = null
   addressHint.value = null
   locStore.selectPlace(place)
+}
+
+async function saveSelectedSearchResult() {
+  await locStore.saveSearchResult()
 }
 
 function cancelPinLabel() {
@@ -142,13 +176,85 @@ void mapEl
           <i class="mdi mdi-refresh"></i>
         </button>
 
+        <button
+          class="map-control map-control--locate"
+          type="button"
+          :class="{
+            'map-control--active': isTracking && !locationError,
+            'map-control--error': !!locationError,
+          }"
+          :title="locateTitle"
+          :aria-label="locateTitle"
+          :disabled="isLocating"
+          @click.stop="onLocateClick"
+        >
+          <i
+            :class="isLocating ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-crosshairs-gps'"
+          ></i>
+        </button>
+
         <Transition name="focus-card">
           <div
             class="focus-card"
-            :class="{ 'focus-card--discovered': locStore.selectedDiscovered }"
-            v-if="locStore.selectedDiscovered || locStore.selected"
+            :class="{
+              'focus-card--discovered': locStore.selectedDiscovered || locStore.selectedSearchResult,
+            }"
+            v-if="locStore.selectedDiscovered || locStore.selectedSearchResult || locStore.selected"
           >
-            <template v-if="locStore.selectedDiscovered">
+            <template v-if="locStore.selectedSearchResult">
+              <div class="focus-card-icon">
+                <i class="mdi mdi-magnify"></i>
+              </div>
+              <div class="focus-card-body">
+                <p class="focus-card-label">Search result</p>
+                <p class="focus-card-title">{{ locStore.selectedSearchResult.name }}</p>
+                <dl class="focus-details">
+                  <div>
+                    <dt>Address</dt>
+                    <dd>{{ locStore.selectedSearchResult.formatted_address }}</dd>
+                  </div>
+                  <div v-if="locStore.selectedSearchResult.rating != null">
+                    <dt>Rating</dt>
+                    <dd>
+                      ★ {{ locStore.selectedSearchResult.rating.toFixed(1) }}
+                      <template v-if="locStore.selectedSearchResult.user_rating_count != null">
+                        ({{ locStore.selectedSearchResult.user_rating_count }} reviews)
+                      </template>
+                    </dd>
+                  </div>
+                  <div v-if="locStore.selectedSearchResult.business_status">
+                    <dt>Status</dt>
+                    <dd class="capitalize">
+                      {{ locStore.selectedSearchResult.business_status.replace(/_/g, ' ').toLowerCase() }}
+                    </dd>
+                  </div>
+                </dl>
+                <button
+                  class="focus-card-save"
+                  type="button"
+                  :disabled="locStore.isSaving"
+                  @click="saveSelectedSearchResult"
+                >
+                  <i
+                    :class="locStore.isSaving ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-bookmark-outline'"
+                  ></i>
+                  {{ locStore.isSaving ? 'Saving…' : 'Save to my spots' }}
+                </button>
+                <p v-if="locStore.actionError" class="focus-card-error">
+                  {{ locStore.actionError }}
+                </p>
+              </div>
+              <button
+                class="focus-card-close"
+                type="button"
+                aria-label="Dismiss"
+                @click="locStore.clearSelection()"
+              >
+                <i class="mdi mdi-close"></i>
+              </button>
+            </template>
+
+            <template v-else-if="locStore.selectedDiscovered">
               <div class="focus-card-icon">
                 <i class="mdi mdi-compass-outline"></i>
               </div>
@@ -356,6 +462,34 @@ void mapEl
   right: 64px;
 }
 
+.map-control--locate {
+  top: 64px;
+}
+
+.map-control--locate.map-control--active {
+  color: #2B6CB0;
+  border-color: rgba(49, 130, 206, 0.35);
+  background: rgba(235, 248, 255, 0.92);
+}
+
+.map-control--locate.map-control--active:hover {
+  background: #3182CE;
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(49, 130, 206, 0.35);
+}
+
+.map-control--locate.map-control--error {
+  color: var(--danger);
+  border-color: rgba(192, 57, 43, 0.3);
+  background: var(--danger-bg);
+}
+
+.map-control--locate:disabled {
+  cursor: wait;
+  opacity: 0.85;
+}
+
 .focus-card {
   position: absolute;
   bottom: 28px;
@@ -424,6 +558,39 @@ void mapEl
 
 .focus-details .capitalize {
   text-transform: capitalize;
+}
+
+.focus-card-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--gradient-accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-glow);
+  transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
+}
+
+.focus-card-save:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow-lg);
+  transform: translateY(-1px);
+}
+
+.focus-card-save:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.focus-card-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger);
 }
 
 .focus-card-icon {

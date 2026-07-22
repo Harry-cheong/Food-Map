@@ -6,6 +6,7 @@ import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import { categoryAccent } from '../constants/categories'
 import { escapeHtml } from '../utils/escapeHtml'
 import type { Place } from '../types/place'
+import type { UserPosition } from './useUserLocation'
 
 /*
 	- Vite may serve default marker assets under hashed URLs — keep Leaflet happy.
@@ -35,6 +36,17 @@ const pinIcon = L.divIcon({
   popupAnchor: [0, -10],
 })
 
+const userLocationIcon = L.divIcon({
+  className: 'userLocationIcon',
+  html: `
+    <div class="user-location">
+      <div class="user-location-dot"></div>
+    </div>
+  `,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+})
+
 function createPopupContent(place: Place): string {
   const color = categoryAccent(place.category)
   return `
@@ -60,6 +72,7 @@ export interface UseMapOptions {
   zoom?: number
   places: Ref<Place[]>
   selected: Ref<Place | null>
+  userPosition?: Ref<UserPosition | null>
   onMapClick?: (latlng: { lat: number; lng: number }) => void
   onSelectPlace?: (place: Place) => void
 }
@@ -74,6 +87,7 @@ export function useMap(options: UseMapOptions) {
     zoom = 12,
     places,
     selected,
+    userPosition,
     onMapClick,
     onSelectPlace,
   } = options
@@ -81,7 +95,10 @@ export function useMap(options: UseMapOptions) {
   const mapEl = ref<HTMLElement | null>(null)
   let map: LeafletMap | null = null
   const markers = new Map<string, L.Marker>()
+  let userMarker: L.Marker | null = null
+  let accuracyCircle: L.Circle | null = null
 
+  // Updates or create if it does not exist
   function upsertMarker(place: Place, openPopup = false) {
     if (!map) return
 
@@ -99,7 +116,7 @@ export function useMap(options: UseMapOptions) {
       L.DomEvent.stopPropagation(e)
       const current = places.value.find((p) => p.uid === place.uid)
       if (!current) return
-      if (onSelectPlace) onSelectPlace(current)
+      if (onSelectPlace) onSelectPlace(current) // selects the location inside stores/place.ts
       else selected.value = current
     })
     markers.set(place.uid, marker)
@@ -130,6 +147,52 @@ export function useMap(options: UseMapOptions) {
     marker?.openPopup()
   }
 
+  function syncUserLocation(pos: UserPosition | null) {
+    if (!map) return
+
+    if (!pos) {
+      userMarker?.remove()
+      accuracyCircle?.remove()
+      userMarker = null
+      accuracyCircle = null
+      return
+    }
+
+    const latlng: LatLngTuple = [pos.lat, pos.lng]
+
+    if (userMarker) {
+      userMarker.setLatLng(latlng)
+    } else {
+      userMarker = L.marker(latlng, {
+        icon: userLocationIcon,
+        interactive: false,
+        zIndexOffset: 1000,
+      }).addTo(map)
+    }
+
+    if (accuracyCircle) {
+      accuracyCircle.setLatLng(latlng)
+      accuracyCircle.setRadius(pos.accuracy)
+    } else {
+      accuracyCircle = L.circle(latlng, {
+        radius: pos.accuracy,
+        className: 'user-accuracy-circle',
+        interactive: false,
+        weight: 1,
+        opacity: 0.45,
+        fillOpacity: 0.12,
+        color: '#2B6CB0',
+        fillColor: '#3182CE',
+      }).addTo(map)
+    }
+  }
+
+  function focusUserLocation() {
+    if (!map || !userPosition?.value) return
+    const { lat, lng } = userPosition.value
+    map.flyTo([lat, lng], 16, { duration: 0.35 })
+  }
+
   function init() {
     if (!mapEl.value || map) return
 
@@ -154,6 +217,7 @@ export function useMap(options: UseMapOptions) {
     }
 
     syncMarkers(places.value)
+    if (userPosition) syncUserLocation(userPosition.value)
     /*
     	- Layout may still be settling (sidebar, etc.)
     */
@@ -162,6 +226,10 @@ export function useMap(options: UseMapOptions) {
 
   function destroy() {
     for (const uid of [...markers.keys()]) removeMarker(uid)
+    userMarker?.remove()
+    accuracyCircle?.remove()
+    userMarker = null
+    accuracyCircle = null
     map?.remove()
     map = null
   }
@@ -188,6 +256,10 @@ export function useMap(options: UseMapOptions) {
     if (place) focusPlace(place)
   })
 
+  if (userPosition) {
+    watch(userPosition, (pos) => syncUserLocation(pos))
+  }
+
   onUnmounted(destroy)
 
   return {
@@ -196,5 +268,6 @@ export function useMap(options: UseMapOptions) {
     destroy,
     reload,
     focusPlace,
+    focusUserLocation,
   }
 }
