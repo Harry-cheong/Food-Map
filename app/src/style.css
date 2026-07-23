@@ -75,7 +75,7 @@ input {
   --font-display:    'Fraunces', Georgia, serif;
   --transition:      0.15s ease;
   --nav-height:      56px;
-  --sidebar-width:   280px;
+  --sidebar-width:   300px;
 
   /* Legacy aliases used in components */
   --sidebar-dark-bg: var(--sidebar-bg);

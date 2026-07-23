@@ -1,7 +1,7 @@
 # Dev Log — Food Map
 
 ## Backlog
-- [ ] Style sidebar
+- [x] Style sidebar
 - [x] Prompt user to label a pinned location
 - [x] Geocoding: resolve coordinates to a human-readable address
 

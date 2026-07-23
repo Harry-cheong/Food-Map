@@ -440,18 +440,18 @@ function formatStatus(status: string | null): string | null {
 }
 
 .empty-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text);
   margin: 0 0 6px;
 }
 
 .empty-hint {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-muted);
   margin: 0;
   line-height: 1.55;
-  max-width: 200px;
+  max-width: 220px;
 }
 
 .empty-action {
@@ -459,9 +459,9 @@ function formatStatus(status: string | null): string | null {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--accent);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
-  padding: 8px 14px;
+  padding: 9px 16px;
   border-radius: var(--radius-full);
   cursor: pointer;
 }
@@ -529,8 +529,8 @@ function formatStatus(status: string | null): string | null {
   flex-direction: column;
   justify-content: center;
   position: relative;
-  min-height: 68px;
-  padding: 10px 12px;
+  min-height: 76px;
+  padding: 12px 14px;
   cursor: pointer;
   border-radius: var(--radius-md);
   border: 1px solid transparent;
@@ -573,15 +573,15 @@ function formatStatus(status: string | null): string | null {
 }
 
 .icon-wrap {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
   transition: background var(--transition), color var(--transition), box-shadow var(--transition);
 }
@@ -605,7 +605,7 @@ function formatStatus(status: string | null): string | null {
 }
 
 .sidebar-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -615,7 +615,7 @@ function formatStatus(status: string | null): string | null {
 }
 
 .sidebar-location {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -631,7 +631,7 @@ function formatStatus(status: string | null): string | null {
 }
 
 .sidebar-category {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 2px 8px;
   width: fit-content;
@@ -640,7 +640,7 @@ function formatStatus(status: string | null): string | null {
 }
 
 .sidebar-list-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: var(--radius-full);
@@ -659,7 +659,7 @@ function formatStatus(status: string | null): string | null {
 
 .sidebar-rating,
 .sidebar-status {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   text-transform: capitalize;
 }
@@ -668,12 +668,12 @@ function formatStatus(status: string | null): string | null {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -703,7 +703,7 @@ function formatStatus(status: string | null): string | null {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -727,7 +727,7 @@ function formatStatus(status: string | null): string | null {
   gap: 6px;
   margin: 10px 4px 4px;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--danger);
   background: var(--danger-bg);
   border-radius: var(--radius-sm);

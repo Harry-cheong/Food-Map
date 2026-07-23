@@ -15,10 +15,10 @@ const locStore = useLocationStore()
 const collapsed = ref(false)
 const mobileOpen = ref(false)
 
-const filters: { id: PlaceFilter; label: string }[] = [
-  { id: 'personal', label: 'Personal' },
-  { id: 'discovered', label: 'Discovered' },
-  { id: 'following', label: 'Following' },
+const filters: { id: PlaceFilter; label: string; short: string; icon: string }[] = [
+  { id: 'personal', label: 'Personal', short: 'Personal', icon: 'mdi-bookmark-outline' },
+  { id: 'discovered', label: 'Discovered', short: 'Discover', icon: 'mdi-compass-outline' },
+  { id: 'following', label: 'Following', short: 'Follow', icon: 'mdi-account-group-outline' },
 ]
 
 const personalLists: { id: PersonalListFilter; label: string }[] = [
@@ -53,6 +53,10 @@ const nearbyReviewsOptions: { value: NearbyMinReviews; label: string }[] = [
 ]
 
 function setFilter(id: PlaceFilter) {
+  if (collapsed.value && !mobileOpen.value && locStore.activeFilter === id) {
+    collapsed.value = false
+    return
+  }
   locStore.setFilter(id)
 }
 
@@ -132,8 +136,64 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
     :class="{ collapsed, 'sidebar--mobile-open': mobileOpen }"
     aria-label="Saved places"
   >
-    <div class="sidebar-header">
-      <div class="header-text" v-if="!collapsed || mobileOpen">
+    <!-- Collapsed icon rail (desktop only) -->
+    <div v-if="collapsed && !mobileOpen" class="rail" aria-label="Sidebar shortcuts">
+      <button
+        class="rail-toggle"
+        type="button"
+        aria-label="Expand sidebar"
+        title="Expand sidebar"
+        @click="toggleCollapsed"
+      >
+        <i class="mdi mdi-chevron-double-right"></i>
+      </button>
+
+      <div class="rail-divider" aria-hidden="true"></div>
+
+      <button
+        v-if="locStore.nearbyActive"
+        type="button"
+        class="rail-btn rail-btn--nearby rail-btn--active"
+        aria-label="Expand nearby results"
+        title="Nearby results"
+        @click="collapsed = false"
+      >
+        <span class="rail-icon-wrap">
+          <i class="mdi mdi-store-search-outline"></i>
+          <span
+            v-if="locStore.placesSearchResults.length"
+            class="rail-badge"
+          >{{ locStore.placesSearchResults.length > 99 ? '99+' : locStore.placesSearchResults.length }}</span>
+        </span>
+        <span class="rail-caption">Nearby</span>
+      </button>
+
+      <template v-if="!locStore.nearbyActive">
+        <button
+          v-for="f in filters"
+          :key="f.id"
+          type="button"
+          class="rail-btn"
+          :class="{ 'rail-btn--active': locStore.activeFilter === f.id }"
+          :aria-label="f.label"
+          :aria-pressed="locStore.activeFilter === f.id"
+          :title="f.label"
+          @click="setFilter(f.id)"
+        >
+          <span class="rail-icon-wrap">
+            <i :class="`mdi ${f.icon}`"></i>
+            <span
+              v-if="f.id === 'personal' && locStore.places.length"
+              class="rail-badge"
+            >{{ locStore.places.length > 99 ? '99+' : locStore.places.length }}</span>
+          </span>
+          <span class="rail-caption">{{ f.short }}</span>
+        </button>
+      </template>
+    </div>
+
+    <div class="sidebar-header" v-if="!collapsed || mobileOpen">
+      <div class="header-text">
         <p class="header-title">
           <template v-if="locStore.nearbyActive">Nearby</template>
           <template v-else-if="locStore.activeFilter === 'discovered'">Discovered</template>
@@ -174,17 +234,11 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
       <button
         class="toggle-btn"
         type="button"
-        :aria-label="collapsed && !mobileOpen ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-label="mobileOpen ? 'Close sidebar' : 'Collapse sidebar'"
         @click="toggleCollapsed"
       >
         <i
-          :class="
-            mobileOpen
-              ? 'mdi mdi-close'
-              : collapsed
-                ? 'mdi mdi-chevron-right'
-                : 'mdi mdi-chevron-left'
-          "
+          :class="mobileOpen ? 'mdi mdi-close' : 'mdi mdi-chevron-left'"
         ></i>
       </button>
     </div>
@@ -366,7 +420,174 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 }
 
 .sidebar.collapsed {
-  width: 52px;
+  width: 72px;
+  background:
+    linear-gradient(180deg, rgba(15, 110, 86, 0.04) 0%, transparent 28%),
+    var(--sidebar-bg);
+}
+
+/* ── Collapsed icon rail ─────────────────────────────── */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  padding: 10px 4px 12px;
+  gap: 2px;
+}
+
+.rail-toggle {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-xs);
+  transition:
+    background var(--transition),
+    color var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
+}
+
+.rail-toggle:hover {
+  background: var(--gradient-accent);
+  border-color: transparent;
+  color: white;
+  box-shadow: var(--shadow-glow);
+  transform: translateX(1px);
+}
+
+.rail-divider {
+  width: 20px;
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0 8px;
+  flex-shrink: 0;
+}
+
+.rail-btn {
+  position: relative;
+  width: 100%;
+  min-height: 58px;
+  padding: 7px 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex-shrink: 0;
+  transition:
+    background var(--transition),
+    color var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.rail-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+
+.rail-btn--active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: rgba(15, 110, 86, 0.22);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rail-btn--active:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: rgba(15, 110, 86, 0.35);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rail-btn--nearby {
+  background: rgba(255, 250, 240, 0.95);
+  color: #C05621;
+  border-color: rgba(221, 107, 32, 0.28);
+  box-shadow: inset 3px 0 0 #DD6B20;
+}
+
+.rail-btn--nearby:hover {
+  background: #FEF1DF;
+  border-color: rgba(221, 107, 32, 0.4);
+  color: #C05621;
+  box-shadow: inset 3px 0 0 #DD6B20;
+}
+
+.rail-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.rail-caption {
+  display: block;
+  max-width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  opacity: 0.78;
+}
+
+.rail-btn--active .rail-caption,
+.rail-btn:hover .rail-caption {
+  opacity: 1;
+}
+
+.rail-badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent-2);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--sidebar-bg);
+  pointer-events: none;
+}
+
+.rail-btn--active .rail-badge {
+  background: var(--accent);
+  color: white;
+}
+
+.rail-btn--nearby .rail-badge {
+  background: #DD6B20;
 }
 
 .sidebar-header {
@@ -386,7 +607,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 
 .header-title {
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 400;
   color: var(--text);
   margin: 0 0 2px;
@@ -394,14 +615,14 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 }
 
 .header-count {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-muted);
   margin: 0;
 }
 
 .toggle-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: var(--surface);
   border: 1px solid var(--border);
   cursor: pointer;
@@ -411,7 +632,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: 18px;
   transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
 
@@ -450,15 +671,15 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   position: absolute;
   left: 24px;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: 18px;
   pointer-events: none;
 }
 
 .search-input {
   width: 100%;
-  height: 36px;
-  padding: 0 32px 0 34px;
-  font-size: 13px;
+  height: 40px;
+  padding: 0 34px 0 36px;
+  font-size: 15px;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   background: var(--surface);
@@ -490,8 +711,8 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 .search-clear {
   position: absolute;
   right: 20px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -500,7 +721,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .search-clear:hover {
@@ -511,11 +732,11 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 .filter-select {
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
-  padding: 6px 12px;
+  padding: 7px 14px;
   flex-shrink: 0;
   background: var(--surface);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition), color var(--transition), border-color var(--transition);
@@ -556,13 +777,13 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: #C05621;
 }
 
 .nearby-banner-text i {
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
 }
 
@@ -570,11 +791,11 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   flex-shrink: 0;
   border: 1px solid rgba(221, 107, 32, 0.28);
   border-radius: var(--radius-full);
-  padding: 4px 10px;
+  padding: 5px 12px;
   background: white;
   color: #C05621;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -602,7 +823,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 
 .sort-label {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -613,11 +834,11 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 .sort-select {
   border: 1px solid transparent;
   border-radius: var(--radius-full);
-  padding: 5px 10px;
+  padding: 6px 12px;
   flex-shrink: 0;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition), color var(--transition), border-color var(--transition);
@@ -636,7 +857,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 
 .list-count {
   margin-left: 4px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
 }
