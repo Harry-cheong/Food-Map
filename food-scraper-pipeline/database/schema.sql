@@ -36,11 +36,13 @@ CREATE TABLE IF NOT EXISTS user_fav (
     named_address        TEXT             NOT NULL,
     category             TEXT             NOT NULL,
     public               BOOLEAN          NOT NULL DEFAULT FALSE,
+    list_status          TEXT             NOT NULL DEFAULT 'to_try',
     submitted_by_user_id INTEGER          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     created_at           TIMESTAMPTZ      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT user_fav_lat_valid CHECK (lat >= -90 AND lat <= 90),
-    CONSTRAINT user_fav_lng_valid CHECK (lng >= -180 AND lng <= 180)
+    CONSTRAINT user_fav_lng_valid CHECK (lng >= -180 AND lng <= 180),
+    CONSTRAINT user_fav_list_status_valid CHECK (list_status IN ('to_try', 'tried'))
 );
 
 -- Look up a user's saved spots
@@ -59,6 +61,10 @@ CREATE INDEX IF NOT EXISTS idx_user_fav_public
 -- Filter by cuisine type
 CREATE INDEX IF NOT EXISTS idx_user_fav_category
     ON user_fav (category);
+
+-- Filter personal list by to-try / tried
+CREATE INDEX IF NOT EXISTS idx_user_fav_list_status
+    ON user_fav (submitted_by_user_id, list_status);
 
 -- ---------------------------------------------------------------------------
 -- discovered_places — HGW articles confirmed via Google Places API

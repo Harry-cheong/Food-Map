@@ -71,8 +71,8 @@ input {
   --radius-lg:       16px;
   --radius-xl:       20px;
   --radius-full:     999px;
-  --font:            'DM Sans', system-ui, sans-serif;
-  --font-display:    'Instrument Serif', Georgia, serif;
+  --font:            'Figtree', system-ui, sans-serif;
+  --font-display:    'Fraunces', Georgia, serif;
   --transition:      0.15s ease;
   --nav-height:      56px;
   --sidebar-width:   280px;
@@ -175,6 +175,17 @@ input {
   pointer-events: none;
 }
 
+.user-location--draggable {
+  width: 28px;
+  height: 28px;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.user-location--draggable:active {
+  cursor: grabbing;
+}
+
 .user-location-dot {
   width: 14px;
   height: 14px;
@@ -184,7 +195,25 @@ input {
   box-shadow: 0 1px 6px rgba(43, 108, 176, 0.55);
 }
 
+.user-location--draggable .user-location-dot {
+  width: 18px;
+  height: 18px;
+}
+
+.user-location--manual .user-location-dot {
+  background: #DD6B20;
+  box-shadow: 0 0 0 3px rgba(221, 107, 32, 0.28), 0 1px 6px rgba(192, 86, 33, 0.45);
+}
+
+.user-location--draggable.user-location--manual .user-location-dot {
+  box-shadow: 0 0 0 4px rgba(221, 107, 32, 0.35), 0 2px 8px rgba(192, 86, 33, 0.5);
+}
+
 .user-accuracy-circle {
+  pointer-events: none;
+}
+
+.search-radius-circle {
   pointer-events: none;
 }
 

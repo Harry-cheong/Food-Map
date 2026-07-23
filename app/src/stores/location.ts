@@ -6,6 +6,8 @@ import {
   fetchDiscovered,
   fetchMyItems,
   searchPlaces,
+  searchPlacesNearby,
+  updateItemListStatus,
 } from '../api/places'
 import {
   discoveredToPlace,
@@ -16,16 +18,29 @@ import {
   searchResultToPlace,
   type PlaceSearchResult,
 } from '../types/placesSearch'
-import { itemToPlace, placeToCreate, type Place } from '../types/place'
+import {
+  itemToPlace,
+  placeToCreate,
+  type ListStatus,
+  type Place,
+} from '../types/place'
 import { useAuthStore } from './auth'
 
 export type PlaceFilter = 'personal' | 'following' | 'discovered'
+export type PersonalListFilter = 'to_try' | 'tried'
 export type DiscoveredSort = 'recent' | 'rating' | 'reviews'
+export type NearbyRadiusM = 500 | 1000 | 2000 | 5000
+export type NearbySort = 'distance' | 'rating' | 'reviews'
 
 export type NewPlaceInput = Omit<Place, 'uid' | 'id'>
 
 const DISCOVERED_PAGE_SIZE = 15
 const PLACES_SEARCH_MIN_LEN = 2
+export const NEARBY_RADIUS_PRESETS: NearbyRadiusM[] = [500, 1000, 2000, 5000]
+export const NEARBY_MIN_RATING_OPTIONS = [null, 3.5, 4, 4.5] as const
+export const NEARBY_MIN_REVIEWS_OPTIONS = [null, 25, 50, 100] as const
+export type NearbyMinRating = (typeof NEARBY_MIN_RATING_OPTIONS)[number]
+export type NearbyMinReviews = (typeof NEARBY_MIN_REVIEWS_OPTIONS)[number]
 
 export const useLocationStore = defineStore('loc', () => {
   const places = ref<Place[]>([])
@@ -41,9 +56,16 @@ export const useLocationStore = defineStore('loc', () => {
   const placesSearchResults = ref<PlaceSearchResult[]>([])
   const isSearchingPlaces = ref(false)
   const placesSearchError = ref<string | null>(null)
+  const nearbyRadiusM = ref<NearbyRadiusM>(1000)
+  const nearbyActive = ref(false)
+  const nearbySort = ref<NearbySort>('distance')
+  const nearbyMinRating = ref<NearbyMinRating>(null)
+  const nearbyMinReviews = ref<NearbyMinReviews>(null)
   const activeFilter = ref<PlaceFilter>('personal')
+  const personalListFilter = ref<PersonalListFilter>('to_try')
   const isSaving = ref(false)
   const isDeleting = ref(false)
+  const isUpdatingListStatus = ref(false)
   const isLoading = ref(false)
   const isLoadingDiscovered = ref(false)
   const actionError = ref<string | null>(null)
@@ -57,6 +79,18 @@ export const useLocationStore = defineStore('loc', () => {
       placesSearchResults.value.length > 0 || selectedSearchResult.value != null,
   )
 
+  const personalPlaces = computed(() =>
+    places.value.filter((place) => place.listStatus === personalListFilter.value),
+  )
+
+  const toTryCount = computed(
+    () => places.value.filter((p) => p.listStatus === 'to_try').length,
+  )
+
+  const triedCount = computed(
+    () => places.value.filter((p) => p.listStatus === 'tried').length,
+  )
+
   const filteredPlaces = computed(() => {
     if (activeFilter.value === 'following') return []
     if (activeFilter.value === 'discovered') {
@@ -64,18 +98,73 @@ export const useLocationStore = defineStore('loc', () => {
     }
 
     const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return places.value
+    if (!q) return personalPlaces.value
 
-    return places.value.filter((place) => {
+    return personalPlaces.value.filter((place) => {
       const haystack = `${place.name} ${place.location} ${place.category} ${place.description}`.toLowerCase()
       return haystack.includes(q)
+    })
+  })
+
+  const filteredNearbyResults = computed(() => {
+    if (!nearbyActive.value) return []
+
+    const q = searchQuery.value.trim().toLowerCase()
+    let results = placesSearchResults.value
+
+    if (q) {
+      results = results.filter((place) => {
+        const haystack = [
+          place.name,
+          place.formatted_address,
+          place.business_status ?? '',
+          place.rating != null ? String(place.rating) : '',
+        ]
+          .join(' ')
+          .toLowerCase()
+        return haystack.includes(q)
+      })
+    }
+
+    const minRating = nearbyMinRating.value
+    if (minRating != null) {
+      results = results.filter(
+        (place) => place.rating != null && place.rating >= minRating,
+      )
+    }
+
+    const minReviews = nearbyMinReviews.value
+    if (minReviews != null) {
+      results = results.filter(
+        (place) =>
+          place.user_rating_count != null && place.user_rating_count >= minReviews,
+      )
+    }
+
+    if (nearbySort.value === 'distance') return results
+
+    return [...results].sort((a, b) => {
+      if (nearbySort.value === 'rating') {
+        const ar = a.rating ?? -1
+        const br = b.rating ?? -1
+        if (br !== ar) return br - ar
+        return (b.user_rating_count ?? 0) - (a.user_rating_count ?? 0)
+      }
+
+      const ac = a.user_rating_count ?? -1
+      const bc = b.user_rating_count ?? -1
+      if (bc !== ac) return bc - ac
+      return (b.rating ?? 0) - (a.rating ?? 0)
     })
   })
 
   /** Places currently shown on the map (search overlay, personal, or discovered). */
   const mapPlaces = computed(() => {
     if (hasPlacesSearchOverlay.value) {
-      const mapped = placesSearchResults.value.map(searchResultToPlace)
+      const source = nearbyActive.value
+        ? filteredNearbyResults.value
+        : placesSearchResults.value
+      const mapped = source.map(searchResultToPlace)
       if (selectedSearchResult.value) {
         const uid = placesSearchUid(selectedSearchResult.value.google_place_id)
         if (!mapped.some((p) => p.uid === uid)) {
@@ -88,7 +177,7 @@ export const useLocationStore = defineStore('loc', () => {
       return discoveredPlaces.value.map(discoveredToPlace)
     }
     if (activeFilter.value === 'following') return []
-    return places.value
+    return personalPlaces.value
   })
 
   async function loadMyPlaces(): Promise<boolean> {
@@ -163,6 +252,7 @@ export const useLocationStore = defineStore('loc', () => {
 
     isSearchingPlaces.value = true
     placesSearchError.value = null
+    nearbyActive.value = false
 
     const { data, error } = await searchPlaces(term)
     if (generation !== placesSearchGeneration) return
@@ -205,13 +295,81 @@ export const useLocationStore = defineStore('loc', () => {
     placesSearchError.value = null
     isSearchingPlaces.value = false
     selectedSearchResult.value = null
+    nearbyActive.value = false
+    searchQuery.value = ''
+  }
+
+  function setNearbyRadius(radius: NearbyRadiusM) {
+    nearbyRadiusM.value = radius
+  }
+
+  function setNearbySort(sort: NearbySort) {
+    nearbySort.value = sort
+  }
+
+  function setNearbyMinRating(rating: NearbyMinRating) {
+    nearbyMinRating.value = rating
+  }
+
+  function setNearbyMinReviews(count: NearbyMinReviews) {
+    nearbyMinReviews.value = count
+  }
+
+  function resetNearbyFilters() {
+    nearbySort.value = 'distance'
+    nearbyMinRating.value = null
+    nearbyMinReviews.value = null
+    searchQuery.value = ''
+  }
+
+  async function runNearbySearch(origin: {
+    lat: number
+    lng: number
+  }, radiusM: NearbyRadiusM = nearbyRadiusM.value): Promise<boolean> {
+    const generation = ++placesSearchGeneration
+    nearbyRadiusM.value = radiusM
+    nearbyActive.value = true
+    placesSearchQuery.value = ''
+    resetNearbyFilters()
+    isSearchingPlaces.value = true
+    placesSearchError.value = null
+    selectedSearchResult.value = null
+
+    const { data, error } = await searchPlacesNearby({
+      lat: origin.lat,
+      lng: origin.lng,
+      radius: radiusM,
+    })
+    if (generation !== placesSearchGeneration) return false
+
+    if (!data) {
+      placesSearchResults.value = []
+      placesSearchError.value = error ?? 'Could not search nearby restaurants.'
+      isSearchingPlaces.value = false
+      return false
+    }
+
+    placesSearchResults.value = data.items
+    placesSearchError.value = null
+    isSearchingPlaces.value = false
+    return true
+  }
+
+  function clearNearbySearch() {
+    clearPlacesSearch()
+    resetNearbyFilters()
   }
 
   async function addNewPlace(input: NewPlaceInput): Promise<Place | null> {
     isSaving.value = true
     actionError.value = null
 
-    const { data, error } = await createItem(placeToCreate(input, true))
+    const payload: NewPlaceInput = {
+      ...input,
+      listStatus: input.listStatus ?? 'to_try',
+    }
+
+    const { data, error } = await createItem(placeToCreate(payload, true))
     if (!data) {
       actionError.value = error ?? 'Could not save this spot. Try again.'
       isSaving.value = false
@@ -220,11 +378,15 @@ export const useLocationStore = defineStore('loc', () => {
 
     const place = itemToPlace(data)
     places.value.push(place)
+    personalListFilter.value = place.listStatus
+    activeFilter.value = 'personal'
     isSaving.value = false
     return place
   }
 
-  async function saveSearchResult(): Promise<Place | null> {
+  async function saveSearchResult(
+    listStatus: ListStatus = 'to_try',
+  ): Promise<Place | null> {
     const result = selectedSearchResult.value
     if (!result) return null
 
@@ -250,6 +412,7 @@ export const useLocationStore = defineStore('loc', () => {
       location: result.formatted_address,
       category: 'Restaurant',
       description: bits.join(' · '),
+      listStatus,
     })
 
     if (!place) return null
@@ -259,6 +422,39 @@ export const useLocationStore = defineStore('loc', () => {
     selected.value = place
     selectedDiscovered.value = null
     return place
+  }
+
+  async function setPlaceListStatus(
+    place: Place,
+    listStatus: ListStatus,
+  ): Promise<boolean> {
+    if (place.id == null) return false
+    if (place.listStatus === listStatus) return true
+
+    isUpdatingListStatus.value = true
+    actionError.value = null
+
+    const { data, error } = await updateItemListStatus(place.id, {
+      list_status: listStatus,
+    })
+
+    if (!data) {
+      actionError.value = error ?? 'Could not update this spot.'
+      isUpdatingListStatus.value = false
+      return false
+    }
+
+    const updated = itemToPlace(data)
+    const index = places.value.findIndex((p) => p.uid === place.uid)
+    if (index !== -1) places.value[index] = updated
+
+    if (selected.value?.uid === place.uid) {
+      selected.value = updated
+    }
+
+    personalListFilter.value = listStatus
+    isUpdatingListStatus.value = false
+    return true
   }
 
   async function deletePlace(place: Place): Promise<boolean> {
@@ -347,6 +543,12 @@ export const useLocationStore = defineStore('loc', () => {
     }
   }
 
+  function setPersonalListFilter(filter: PersonalListFilter) {
+    if (personalListFilter.value === filter) return
+    personalListFilter.value = filter
+    clearSelection()
+  }
+
   function setDiscoveredSort(sort: DiscoveredSort) {
     if (discoveredSort.value === sort) return
     discoveredSort.value = sort
@@ -384,6 +586,7 @@ export const useLocationStore = defineStore('loc', () => {
     )
 
     watch(searchQuery, () => {
+      if (nearbyActive.value) return
       if (activeFilter.value !== 'discovered') return
       if (searchTimer) clearTimeout(searchTimer)
       searchTimer = setTimeout(() => {
@@ -410,12 +613,23 @@ export const useLocationStore = defineStore('loc', () => {
     placesSearchResults,
     isSearchingPlaces,
     placesSearchError,
+    nearbyRadiusM,
+    nearbyActive,
+    nearbySort,
+    nearbyMinRating,
+    nearbyMinReviews,
     hasPlacesSearchOverlay,
     activeFilter,
+    personalListFilter,
+    personalPlaces,
+    toTryCount,
+    triedCount,
     filteredPlaces,
+    filteredNearbyResults,
     mapPlaces,
     isSaving,
     isDeleting,
+    isUpdatingListStatus,
     isLoading,
     isLoadingDiscovered,
     actionError,
@@ -424,8 +638,15 @@ export const useLocationStore = defineStore('loc', () => {
     runPlacesSearch,
     setPlacesSearchQuery,
     clearPlacesSearch,
+    setNearbyRadius,
+    setNearbySort,
+    setNearbyMinRating,
+    setNearbyMinReviews,
+    runNearbySearch,
+    clearNearbySearch,
     saveSearchResult,
     addNewPlace,
+    setPlaceListStatus,
     deletePlace,
     selectPlace,
     selectDiscovered,
@@ -433,6 +654,7 @@ export const useLocationStore = defineStore('loc', () => {
     clearSelection,
     setSearchQuery,
     setFilter,
+    setPersonalListFilter,
     setDiscoveredSort,
     clearPlaces,
     bindAuthSession,

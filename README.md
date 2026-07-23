@@ -25,7 +25,7 @@ DB_HOST=localhost
 DB_PORT=5432
 ```
 
-(`GOOGLE_PLACES_API_KEY` is required for the HungryGoWhere scraper and for live restaurant search via `GET /places/search`.)
+(`GOOGLE_PLACES_API_KEY` is required for the HungryGoWhere scraper and for live restaurant search via `GET /places/search` and nearby radius search via `GET /places/nearby`.)
 
 ## Local setup
 
@@ -40,6 +40,12 @@ Schema is applied on **first** container boot via `database/schema.sql`. If the 
 
 ```bash
 docker exec -i food-scraper-pg psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < database/schema.sql
+```
+
+Existing databases that already have `user_fav` need the list-status migration:
+
+```bash
+docker exec -i food-scraper-pg psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < database/migrate_list_status.sql
 ```
 
 ### 2. Backend

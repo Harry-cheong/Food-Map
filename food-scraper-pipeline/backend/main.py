@@ -105,6 +105,28 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user_id: int = Depe
 
     return {"message": "Item deleted successfully"}
 
+
+@app.patch("/items/{item_id}", response_model=schemas.ItemResponse)
+def update_item_list_status(
+    item_id: int,
+    body: schemas.ItemListStatusUpdate,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    item = db.query(models.Item).filter(
+        models.Item.id == item_id,
+        models.Item.submitted_by_user_id == user_id,
+    ).first()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    item.list_status = body.list_status
+    db.commit()
+    db.refresh(item)
+    return item
+
+
 @app.get("/items/me", response_model=list[schemas.ItemResponse])
 def get_item(db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
     return db.query(models.Item).filter(models.Item.submitted_by_user_id == user_id).all()
@@ -159,6 +181,25 @@ def list_discovered(
         has_more=offset + len(items) < total,
     )
 
+def _place_search_page(hits: list[places_search.PlaceHit], query: str) -> schemas.PlaceSearchPage:
+    return schemas.PlaceSearchPage(
+        items=[
+            schemas.PlaceSearchResult(
+                google_place_id=hit.google_place_id,
+                name=hit.name,
+                formatted_address=hit.formatted_address,
+                lat=hit.lat,
+                lng=hit.lng,
+                rating=hit.rating,
+                user_rating_count=hit.user_rating_count,
+                business_status=hit.business_status,
+            )
+            for hit in hits
+        ],
+        query=query,
+    )
+
+
 @app.get("/places/search", response_model=schemas.PlaceSearchPage)
 def search_places(
     q: str = Query(..., min_length=2, max_length=200),
@@ -176,19 +217,22 @@ def search_places(
             detail=str(exc),
         ) from exc
 
-    return schemas.PlaceSearchPage(
-        items=[
-            schemas.PlaceSearchResult(
-                google_place_id=hit.google_place_id,
-                name=hit.name,
-                formatted_address=hit.formatted_address,
-                lat=hit.lat,
-                lng=hit.lng,
-                rating=hit.rating,
-                user_rating_count=hit.user_rating_count,
-                business_status=hit.business_status,
-            )
-            for hit in hits
-        ],
-        query=term,
-    )
+    return _place_search_page(hits, term)
+
+
+@app.get("/places/nearby", response_model=schemas.PlaceSearchPage)
+def search_places_nearby(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    radius: float = Query(1000, ge=1, le=50000),
+):
+    """Live Google Places nearby restaurant search within a radius (meters). No auth required."""
+    try:
+        hits = places_search.search_restaurants_nearby(lat, lng, radius)
+    except places_search.PlacesSearchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return _place_search_page(hits, f"nearby:{lat:.5f},{lng:.5f}:{int(radius)}m")

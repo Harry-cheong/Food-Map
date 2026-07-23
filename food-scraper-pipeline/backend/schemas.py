@@ -1,6 +1,9 @@
 # pydantic shapes for requests/responses
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Literal
+
+ListStatus = Literal["to_try", "tried"]
 
 # For creating/receiving items (input)
 class ItemBase(BaseModel):
@@ -11,6 +14,7 @@ class ItemBase(BaseModel):
     category: str
     description: str
     public: bool
+    list_status: ListStatus = Field(default="to_try")
 
 # For returning items (output) — includes DB-generated fields
 class ItemResponse(ItemBase):
@@ -19,6 +23,10 @@ class ItemResponse(ItemBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ItemListStatusUpdate(BaseModel):
+    list_status: ListStatus
 
 class MessageResponse(BaseModel):
     message: str

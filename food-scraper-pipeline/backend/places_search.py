@@ -14,11 +14,15 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 log = logging.getLogger(__name__)
 
 PLACES_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+PLACES_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
 FIELD_MASK = (
     "places.id,places.displayName,places.formattedAddress,"
     "places.location,places.businessStatus,places.rating,places.userRatingCount"
 )
 DEFAULT_MAX_RESULTS = 8
+DEFAULT_NEARBY_MAX_RESULTS = 20
+MIN_RADIUS_M = 1.0
+MAX_RADIUS_M = 50000.0
 
 
 @dataclass
@@ -48,38 +52,17 @@ def _api_key() -> str:
     return key
 
 
-def search_restaurants(query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[PlaceHit]:
-    """
-    Live Google Places Text Search for restaurants (Singapore-biased).
-    """
-    term = query.strip()
-    if not term:
-        return []
-
-    headers = {
+def _headers() -> dict[str, str]:
+    return {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": _api_key(),
         "X-Goog-FieldMask": FIELD_MASK,
     }
-    body = {
-        "textQuery": f"{term} restaurant Singapore",
-        "maxResultCount": max(1, min(max_results, 20)),
-        "regionCode": "SG",
-        "includedType": "restaurant",
-    }
 
-    try:
-        resp = requests.post(PLACES_SEARCH_URL, headers=headers, json=body, timeout=15)
-    except requests.RequestException as exc:
-        log.warning("Places API request failed: %s", exc)
-        raise PlacesSearchError("Could not reach Google Places") from exc
 
-    if not resp.ok:
-        log.warning("Places API error (%s): %s", resp.status_code, resp.text[:300])
-        raise PlacesSearchError("Google Places search failed", status_code=resp.status_code)
-
+def _parse_hits(payload: dict, *, fallback_name: str = "Restaurant") -> list[PlaceHit]:
     hits: list[PlaceHit] = []
-    for place in resp.json().get("places", []):
+    for place in payload.get("places", []):
         location = place.get("location") or {}
         lat = location.get("latitude")
         lng = location.get("longitude")
@@ -94,7 +77,7 @@ def search_restaurants(query: str, *, max_results: int = DEFAULT_MAX_RESULTS) ->
         hits.append(
             PlaceHit(
                 google_place_id=place_id,
-                name=display_name.get("text") or term,
+                name=display_name.get("text") or fallback_name,
                 formatted_address=place.get("formattedAddress") or "",
                 lat=lat,
                 lng=lng,
@@ -103,5 +86,61 @@ def search_restaurants(query: str, *, max_results: int = DEFAULT_MAX_RESULTS) ->
                 business_status=place.get("businessStatus"),
             )
         )
-
     return hits
+
+
+def _post_places(url: str, body: dict) -> dict:
+    try:
+        resp = requests.post(url, headers=_headers(), json=body, timeout=15)
+    except requests.RequestException as exc:
+        log.warning("Places API request failed: %s", exc)
+        raise PlacesSearchError("Could not reach Google Places") from exc
+
+    if not resp.ok:
+        log.warning("Places API error (%s): %s", resp.status_code, resp.text[:300])
+        raise PlacesSearchError("Google Places search failed", status_code=resp.status_code)
+
+    return resp.json()
+
+
+def search_restaurants(query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[PlaceHit]:
+    """
+    Live Google Places Text Search for restaurants (Singapore-biased).
+    """
+    term = query.strip()
+    if not term:
+        return []
+
+    body = {
+        "textQuery": f"{term} restaurant Singapore",
+        "maxResultCount": max(1, min(max_results, 20)),
+        "regionCode": "SG",
+        "includedType": "restaurant",
+    }
+    return _parse_hits(_post_places(PLACES_SEARCH_URL, body), fallback_name=term)
+
+
+def search_restaurants_nearby(
+    lat: float,
+    lng: float,
+    radius_m: float,
+    *,
+    max_results: int = DEFAULT_NEARBY_MAX_RESULTS,
+) -> list[PlaceHit]:
+    """
+    Live Google Places Nearby Search for restaurants within a circle.
+    """
+    radius = max(MIN_RADIUS_M, min(float(radius_m), MAX_RADIUS_M))
+    body = {
+        "includedTypes": ["restaurant"],
+        "maxResultCount": max(1, min(max_results, 20)),
+        "rankPreference": "DISTANCE",
+        "regionCode": "SG",
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": radius,
+            }
+        },
+    }
+    return _parse_hits(_post_places(PLACES_NEARBY_URL, body))

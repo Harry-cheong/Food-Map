@@ -6,7 +6,7 @@ import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png'
 import { categoryAccent } from '../constants/categories'
 import { escapeHtml } from '../utils/escapeHtml'
 import type { Place } from '../types/place'
-import type { UserPosition } from './useUserLocation'
+import type { OriginSource, UserPosition } from './useUserLocation'
 
 /*
 	- Vite may serve default marker assets under hashed URLs — keep Leaflet happy.
@@ -47,10 +47,32 @@ const userLocationIcon = L.divIcon({
   iconAnchor: [9, 9],
 })
 
+const manualOriginIcon = L.divIcon({
+  className: 'userLocationIcon userLocationIcon--manual',
+  html: `
+    <div class="user-location user-location--manual">
+      <div class="user-location-dot"></div>
+    </div>
+  `,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+})
+
+const draggableOriginIcon = L.divIcon({
+  className: 'userLocationIcon userLocationIcon--manual',
+  html: `
+    <div class="user-location user-location--manual user-location--draggable">
+      <div class="user-location-dot"></div>
+    </div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+})
+
 function createPopupContent(place: Place): string {
   const color = categoryAccent(place.category)
   return `
-    <div style="font-family: 'DM Sans', sans-serif; min-width: 200px;">
+    <div style="font-family: 'Figtree', sans-serif; min-width: 200px;">
       <div style="font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #1A1A18; letter-spacing: -0.01em;">${escapeHtml(place.name)}</div>
       <span style="
         background: ${color}18;
@@ -73,8 +95,12 @@ export interface UseMapOptions {
   places: Ref<Place[]>
   selected: Ref<Place | null>
   userPosition?: Ref<UserPosition | null>
+  originSource?: Ref<OriginSource | null>
+  originDraggable?: Ref<boolean>
+  searchRadiusM?: Ref<number | null>
   onMapClick?: (latlng: { lat: number; lng: number }) => void
   onSelectPlace?: (place: Place) => void
+  onOriginDragEnd?: (latlng: { lat: number; lng: number }) => void
 }
 
 /*
@@ -88,8 +114,12 @@ export function useMap(options: UseMapOptions) {
     places,
     selected,
     userPosition,
+    originSource,
+    originDraggable,
+    searchRadiusM,
     onMapClick,
     onSelectPlace,
+    onOriginDragEnd,
   } = options
 
   const mapEl = ref<HTMLElement | null>(null)
@@ -97,6 +127,7 @@ export function useMap(options: UseMapOptions) {
   const markers = new Map<string, L.Marker>()
   let userMarker: L.Marker | null = null
   let accuracyCircle: L.Circle | null = null
+  let searchRadiusCircle: L.Circle | null = null
 
   // Updates or create if it does not exist
   function upsertMarker(place: Place, openPopup = false) {
@@ -116,7 +147,7 @@ export function useMap(options: UseMapOptions) {
       L.DomEvent.stopPropagation(e)
       const current = places.value.find((p) => p.uid === place.uid)
       if (!current) return
-      if (onSelectPlace) onSelectPlace(current) // selects the location inside stores/place.ts
+      if (onSelectPlace) onSelectPlace(current)
       else selected.value = current
     })
     markers.set(place.uid, marker)
@@ -147,6 +178,25 @@ export function useMap(options: UseMapOptions) {
     marker?.openPopup()
   }
 
+  function originIcon() {
+    if (originDraggable?.value) return draggableOriginIcon
+    return originSource?.value === 'manual' ? manualOriginIcon : userLocationIcon
+  }
+
+  function bindOriginDrag(marker: L.Marker) {
+    marker.off('dragend')
+    marker.off('dragstart')
+    if (!onOriginDragEnd) return
+    marker.on('dragstart', (e) => {
+      L.DomEvent.stopPropagation(e)
+    })
+    marker.on('dragend', (e) => {
+      L.DomEvent.stopPropagation(e)
+      const latlng = marker.getLatLng()
+      onOriginDragEnd({ lat: latlng.lat, lng: latlng.lng })
+    })
+  }
+
   function syncUserLocation(pos: UserPosition | null) {
     if (!map) return
 
@@ -159,18 +209,35 @@ export function useMap(options: UseMapOptions) {
     }
 
     const latlng: LatLngTuple = [pos.lat, pos.lng]
+    const draggable = originDraggable?.value === true
+    const icon = originIcon()
 
     if (userMarker) {
       userMarker.setLatLng(latlng)
+      userMarker.setIcon(icon)
+      if (userMarker.dragging) {
+        if (draggable) userMarker.dragging.enable()
+        else userMarker.dragging.disable()
+      }
     } else {
       userMarker = L.marker(latlng, {
-        icon: userLocationIcon,
-        interactive: false,
+        icon,
+        interactive: true,
+        draggable: true,
         zIndexOffset: 1000,
+        bubblingMouseEvents: false,
       }).addTo(map)
+      bindOriginDrag(userMarker)
+      if (!draggable) userMarker.dragging?.disable()
     }
 
-    if (accuracyCircle) {
+    if (userMarker) bindOriginDrag(userMarker)
+
+    const showAccuracy = originSource?.value !== 'manual' && !draggable
+    if (!showAccuracy) {
+      accuracyCircle?.remove()
+      accuracyCircle = null
+    } else if (accuracyCircle) {
       accuracyCircle.setLatLng(latlng)
       accuracyCircle.setRadius(pos.accuracy)
     } else {
@@ -187,10 +254,54 @@ export function useMap(options: UseMapOptions) {
     }
   }
 
+  function syncSearchRadius() {
+    if (!map || !userPosition) return
+
+    const radius = searchRadiusM?.value ?? null
+    const pos = userPosition.value
+    if (radius == null || !pos) {
+      searchRadiusCircle?.remove()
+      searchRadiusCircle = null
+      return
+    }
+
+    const latlng: LatLngTuple = [pos.lat, pos.lng]
+    if (searchRadiusCircle) {
+      searchRadiusCircle.setLatLng(latlng)
+      searchRadiusCircle.setRadius(radius)
+      return
+    }
+
+    searchRadiusCircle = L.circle(latlng, {
+      radius,
+      className: 'search-radius-circle',
+      interactive: false,
+      weight: 1.5,
+      opacity: 0.55,
+      fillOpacity: 0.08,
+      color: '#C05621',
+      fillColor: '#DD6B20',
+      dashArray: '6 4',
+    }).addTo(map)
+  }
+
   function focusUserLocation() {
     if (!map || !userPosition?.value) return
     const { lat, lng } = userPosition.value
     map.flyTo([lat, lng], 16, { duration: 0.35 })
+  }
+
+  function focusSearchRadius() {
+    if (!map || !userPosition?.value) return
+    const radius = searchRadiusM?.value
+    const { lat, lng } = userPosition.value
+    if (radius == null) {
+      focusUserLocation()
+      return
+    }
+
+    const bounds = L.latLng(lat, lng).toBounds(radius * 2)
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16, animate: true })
   }
 
   function init() {
@@ -218,6 +329,7 @@ export function useMap(options: UseMapOptions) {
 
     syncMarkers(places.value)
     if (userPosition) syncUserLocation(userPosition.value)
+    syncSearchRadius()
     /*
     	- Layout may still be settling (sidebar, etc.)
     */
@@ -228,8 +340,10 @@ export function useMap(options: UseMapOptions) {
     for (const uid of [...markers.keys()]) removeMarker(uid)
     userMarker?.remove()
     accuracyCircle?.remove()
+    searchRadiusCircle?.remove()
     userMarker = null
     accuracyCircle = null
+    searchRadiusCircle = null
     map?.remove()
     map = null
   }
@@ -257,7 +371,26 @@ export function useMap(options: UseMapOptions) {
   })
 
   if (userPosition) {
-    watch(userPosition, (pos) => syncUserLocation(pos))
+    watch(userPosition, (pos) => {
+      syncUserLocation(pos)
+      syncSearchRadius()
+    })
+  }
+
+  if (originSource) {
+    watch(originSource, () => {
+      if (userPosition) syncUserLocation(userPosition.value)
+    })
+  }
+
+  if (originDraggable) {
+    watch(originDraggable, () => {
+      if (userPosition) syncUserLocation(userPosition.value)
+    })
+  }
+
+  if (searchRadiusM) {
+    watch(searchRadiusM, () => syncSearchRadius())
   }
 
   onUnmounted(destroy)
@@ -269,5 +402,6 @@ export function useMap(options: UseMapOptions) {
     reload,
     focusPlace,
     focusUserLocation,
+    focusSearchRadius,
   }
 }

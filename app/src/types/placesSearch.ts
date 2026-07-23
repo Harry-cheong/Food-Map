@@ -39,5 +39,6 @@ export function searchResultToPlace(r: PlaceSearchResult): Place {
     location: r.formatted_address,
     category: 'Restaurant',
     description: bits.join(' · ') || r.formatted_address,
+    listStatus: 'to_try',
   }
 }

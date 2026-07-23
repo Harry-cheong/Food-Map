@@ -26,6 +26,7 @@ class Item(Base):
     named_address: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
     public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    list_status: Mapped[str] = mapped_column(String, nullable=False, default="to_try")
     submitted_by_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { FOOD_CATEGORIES } from '../constants/categories'
+import type { ListStatus } from '../types/place'
 
 const props = defineProps<{
   open: boolean
@@ -10,13 +11,21 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  save: [payload: { name: string; category: string; description: string }]
+  save: [
+    payload: {
+      name: string
+      category: string
+      description: string
+      listStatus: ListStatus
+    },
+  ]
   cancel: []
 }>()
 
 const name = ref('')
 const category = ref<string>(FOOD_CATEGORIES[0])
 const description = ref('')
+const listStatus = ref<ListStatus>('to_try')
 const localError = ref('')
 
 watch(
@@ -26,6 +35,7 @@ watch(
       name.value = ''
       category.value = FOOD_CATEGORIES[0]
       description.value = ''
+      listStatus.value = 'to_try'
       localError.value = ''
     }
   }
@@ -42,6 +52,7 @@ function submit() {
     name: trimmed,
     category: category.value,
     description: description.value.trim() || 'No description yet.',
+    listStatus: listStatus.value,
   })
 }
 </script>
@@ -83,6 +94,28 @@ function submit() {
           <select id="pin-category" v-model="category" class="input-field select-field">
             <option v-for="c in FOOD_CATEGORIES" :key="c" :value="c">{{ c }}</option>
           </select>
+        </div>
+
+        <div class="input-group">
+          <span class="field-label" id="pin-list-label">List</span>
+          <div class="list-toggle" role="group" aria-labelledby="pin-list-label">
+            <button
+              type="button"
+              class="list-option"
+              :class="{ 'list-option--active': listStatus === 'to_try' }"
+              @click="listStatus = 'to_try'"
+            >
+              To try
+            </button>
+            <button
+              type="button"
+              class="list-option"
+              :class="{ 'list-option--active': listStatus === 'tried' }"
+              @click="listStatus = 'tried'"
+            >
+              Tried
+            </button>
+          </div>
         </div>
 
         <div class="input-group">
@@ -229,12 +262,43 @@ function submit() {
   margin-bottom: 14px;
 }
 
-.input-group label {
+.input-group label,
+.field-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.list-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.list-option {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.list-option--active {
+  background: var(--gradient-accent);
+  border-color: transparent;
+  color: white;
+  box-shadow: var(--shadow-glow);
+}
+
+.list-option:hover:not(.list-option--active) {
+  border-color: rgba(15, 110, 86, 0.3);
+  color: var(--text);
 }
 
 .optional {

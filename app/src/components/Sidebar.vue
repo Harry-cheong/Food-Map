@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import SidebarFoodDrawer from './SidebarFoodDrawer.vue'
-import { useLocationStore, type DiscoveredSort, type PlaceFilter } from '../stores/location'
+import {
+  useLocationStore,
+  type DiscoveredSort,
+  type NearbyMinRating,
+  type NearbyMinReviews,
+  type NearbySort,
+  type PersonalListFilter,
+  type PlaceFilter,
+} from '../stores/location'
 
 const locStore = useLocationStore()
 const collapsed = ref(false)
@@ -13,18 +21,51 @@ const filters: { id: PlaceFilter; label: string }[] = [
   { id: 'following', label: 'Following' },
 ]
 
+const personalLists: { id: PersonalListFilter; label: string }[] = [
+  { id: 'to_try', label: 'To try' },
+  { id: 'tried', label: 'Tried' },
+]
+
 const sortOptions: { id: DiscoveredSort; label: string }[] = [
   { id: 'recent', label: 'Newest' },
   { id: 'rating', label: 'Highly rated' },
   { id: 'reviews', label: 'Most reviewed' },
 ]
 
+const nearbySortOptions: { id: NearbySort; label: string }[] = [
+  { id: 'distance', label: 'Nearest' },
+  { id: 'rating', label: 'Highest rated' },
+  { id: 'reviews', label: 'Most reviewed' },
+]
+
+const nearbyRatingOptions: { value: NearbyMinRating; label: string }[] = [
+  { value: null, label: 'Any ★' },
+  { value: 3.5, label: '3.5+' },
+  { value: 4, label: '4.0+' },
+  { value: 4.5, label: '4.5+' },
+]
+
+const nearbyReviewsOptions: { value: NearbyMinReviews; label: string }[] = [
+  { value: null, label: 'Any reviews' },
+  { value: 25, label: '25+' },
+  { value: 50, label: '50+' },
+  { value: 100, label: '100+' },
+]
+
 function setFilter(id: PlaceFilter) {
   locStore.setFilter(id)
 }
 
+function setPersonalList(id: PersonalListFilter) {
+  locStore.setPersonalListFilter(id)
+}
+
 function setSort(id: DiscoveredSort) {
   locStore.setDiscoveredSort(id)
+}
+
+function personalListCount(id: PersonalListFilter): number {
+  return id === 'to_try' ? locStore.toTryCount : locStore.triedCount
 }
 
 function syncMobileDefault() {
@@ -46,6 +87,17 @@ function closeMobile() {
   }
 }
 
+/*
+	- Reveal the sidebar after nearby search (expand desktop, open drawer on mobile).
+*/
+function ensureVisible() {
+  if (window.matchMedia('(max-width: 720px)').matches) {
+    openMobile()
+    return
+  }
+  collapsed.value = false
+}
+
 function toggleCollapsed() {
   if (window.matchMedia('(max-width: 720px)').matches) {
     if (mobileOpen.value) closeMobile()
@@ -64,7 +116,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', syncMobileDefault)
 })
 
-defineExpose({ openMobile, closeMobile })
+defineExpose({ openMobile, closeMobile, ensureVisible })
 </script>
 
 <template>
@@ -83,17 +135,38 @@ defineExpose({ openMobile, closeMobile })
     <div class="sidebar-header">
       <div class="header-text" v-if="!collapsed || mobileOpen">
         <p class="header-title">
-          {{ locStore.activeFilter === 'discovered' ? 'Discovered' : 'Your spots' }}
+          <template v-if="locStore.nearbyActive">Nearby</template>
+          <template v-else-if="locStore.activeFilter === 'discovered'">Discovered</template>
+          <template v-else>Your spots</template>
         </p>
         <p class="header-count">
-          <template v-if="locStore.activeFilter === 'discovered'">
+          <template v-if="locStore.nearbyActive">
+            <template v-if="locStore.isSearchingPlaces">Searching…</template>
+            <template v-else-if="locStore.searchQuery.trim() || locStore.nearbyMinRating != null || locStore.nearbyMinReviews != null">
+              {{ locStore.filteredNearbyResults.length }}
+              of {{ locStore.placesSearchResults.length }}
+              shown
+            </template>
+            <template v-else>
+              {{ locStore.placesSearchResults.length }}
+              {{ locStore.placesSearchResults.length === 1 ? 'restaurant' : 'restaurants' }}
+              within
+              {{
+                locStore.nearbyRadiusM < 1000
+                  ? `${locStore.nearbyRadiusM}m`
+                  : `${locStore.nearbyRadiusM / 1000}km`
+              }}
+            </template>
+          </template>
+          <template v-else-if="locStore.activeFilter === 'discovered'">
             {{ locStore.discoveredPlaces.length }}
             of {{ locStore.discoveredTotal }}
             {{ locStore.discoveredTotal === 1 ? 'place' : 'places' }}
           </template>
           <template v-else>
-            {{ locStore.places.length }}
-            {{ locStore.places.length === 1 ? 'place' : 'places' }} saved
+            {{ locStore.personalPlaces.length }}
+            {{ locStore.personalListFilter === 'tried' ? 'tried' : 'to try' }}
+            · {{ locStore.places.length }} saved
           </template>
         </p>
       </div>
@@ -122,9 +195,11 @@ defineExpose({ openMobile, closeMobile })
         type="search"
         class="search-input"
         :placeholder="
-          locStore.activeFilter === 'discovered'
-            ? 'Search discovered spots…'
-            : 'Search your saved spots…'
+          locStore.nearbyActive
+            ? 'Filter nearby results…'
+            : locStore.activeFilter === 'discovered'
+              ? 'Search discovered spots…'
+              : 'Search your saved spots…'
         "
         :value="locStore.searchQuery"
         @input="locStore.setSearchQuery(($event.target as HTMLInputElement).value)"
@@ -140,7 +215,81 @@ defineExpose({ openMobile, closeMobile })
       </button>
     </div>
 
-    <div class="filter-drawer" v-if="!collapsed || mobileOpen">
+    <div
+      v-if="locStore.nearbyActive && (!collapsed || mobileOpen)"
+      class="nearby-banner"
+    >
+      <span class="nearby-banner-text">
+        <i class="mdi mdi-store-search-outline"></i>
+        Radius search results
+      </span>
+      <button
+        type="button"
+        class="nearby-banner-clear"
+        @click="locStore.clearNearbySearch()"
+      >
+        Clear
+      </button>
+    </div>
+
+    <div
+      v-if="locStore.nearbyActive && (!collapsed || mobileOpen)"
+      class="sort-drawer"
+      role="group"
+      aria-label="Sort nearby places"
+    >
+      <span class="sort-label">Sort</span>
+      <button
+        v-for="s in nearbySortOptions"
+        :key="s.id"
+        type="button"
+        class="sort-select"
+        :class="{ 'sort-select--active': locStore.nearbySort === s.id }"
+        @click="locStore.setNearbySort(s.id)"
+      >
+        {{ s.label }}
+      </button>
+    </div>
+
+    <div
+      v-if="locStore.nearbyActive && (!collapsed || mobileOpen)"
+      class="sort-drawer sort-drawer--filters"
+      role="group"
+      aria-label="Filter nearby by rating"
+    >
+      <span class="sort-label">Rating</span>
+      <button
+        v-for="opt in nearbyRatingOptions"
+        :key="String(opt.value)"
+        type="button"
+        class="sort-select"
+        :class="{ 'sort-select--active': locStore.nearbyMinRating === opt.value }"
+        @click="locStore.setNearbyMinRating(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+
+    <div
+      v-if="locStore.nearbyActive && (!collapsed || mobileOpen)"
+      class="sort-drawer sort-drawer--filters"
+      role="group"
+      aria-label="Filter nearby by review count"
+    >
+      <span class="sort-label">Reviews</span>
+      <button
+        v-for="opt in nearbyReviewsOptions"
+        :key="String(opt.value)"
+        type="button"
+        class="sort-select"
+        :class="{ 'sort-select--active': locStore.nearbyMinReviews === opt.value }"
+        @click="locStore.setNearbyMinReviews(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+
+    <div class="filter-drawer" v-if="(!collapsed || mobileOpen) && !locStore.nearbyActive">
       <button
         v-for="f in filters"
         :key="f.id"
@@ -154,7 +303,27 @@ defineExpose({ openMobile, closeMobile })
     </div>
 
     <div
-      v-if="locStore.activeFilter === 'discovered' && (!collapsed || mobileOpen)"
+      v-if="locStore.activeFilter === 'personal' && !locStore.nearbyActive && (!collapsed || mobileOpen)"
+      class="sort-drawer"
+      role="group"
+      aria-label="Personal list"
+    >
+      <span class="sort-label">List</span>
+      <button
+        v-for="list in personalLists"
+        :key="list.id"
+        type="button"
+        class="sort-select"
+        :class="{ 'sort-select--active': locStore.personalListFilter === list.id }"
+        @click="setPersonalList(list.id)"
+      >
+        {{ list.label }}
+        <span class="list-count">{{ personalListCount(list.id) }}</span>
+      </button>
+    </div>
+
+    <div
+      v-if="locStore.activeFilter === 'discovered' && !locStore.nearbyActive && (!collapsed || mobileOpen)"
       class="sort-drawer"
       role="group"
       aria-label="Sort discovered places"
@@ -372,6 +541,50 @@ defineExpose({ openMobile, closeMobile })
   border-bottom: 1px solid var(--border-soft);
 }
 
+.nearby-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(221, 107, 32, 0.2);
+  background: rgba(255, 250, 240, 0.95);
+}
+
+.nearby-banner-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #C05621;
+}
+
+.nearby-banner-text i {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.nearby-banner-clear {
+  flex-shrink: 0;
+  border: 1px solid rgba(221, 107, 32, 0.28);
+  border-radius: var(--radius-full);
+  padding: 4px 10px;
+  background: white;
+  color: #C05621;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nearby-banner-clear:hover {
+  background: #DD6B20;
+  border-color: #DD6B20;
+  color: white;
+}
+
 .sort-drawer {
   display: flex;
   align-items: center;
@@ -380,6 +593,11 @@ defineExpose({ openMobile, closeMobile })
   gap: 6px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
+}
+
+.sort-drawer--filters {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .sort-label {
@@ -414,6 +632,17 @@ defineExpose({ openMobile, closeMobile })
 
 .sort-select:hover {
   color: var(--text);
+}
+
+.list-count {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sort-select--active .list-count {
+  color: var(--text-secondary);
 }
 
 @media (max-width: 720px) {

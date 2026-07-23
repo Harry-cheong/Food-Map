@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { LatLngTuple } from 'leaflet'
 import NavigationBar from '../components/NavigationBar.vue'
 import Sidebar from '../components/Sidebar.vue'
 import PinLabelModal from '../components/PinLabelModal.vue'
 import { useAuthStore } from '../stores/auth'
-import { useLocationStore } from '../stores/location'
+import {
+  NEARBY_RADIUS_PRESETS,
+  useLocationStore,
+  type NearbyRadiusM,
+} from '../stores/location'
 import { useMap } from '../composables/useMap'
 import { useUserLocation } from '../composables/useUserLocation'
-import { reverseGeocode } from '../composables/useGeocode'
+import { forwardGeocode, reverseGeocode } from '../composables/useGeocode'
 import { categoryAccent } from '../constants/categories'
 import { storeToRefs } from 'pinia'
+import type { ListStatus } from '../types/place'
 
 const props = defineProps<{
   showLogin?: boolean
@@ -20,7 +25,8 @@ const props = defineProps<{
 
 const locStore = useLocationStore()
 const auth = useAuthStore()
-const { mapPlaces, selected } = storeToRefs(locStore)
+const { mapPlaces, selected, nearbyRadiusM, nearbyActive, isSearchingPlaces } =
+  storeToRefs(locStore)
 
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
 
@@ -33,9 +39,47 @@ const addressHint = ref<string | null>(null)
 const pinError = ref<string | null>(null)
 const resolvingAddress = ref(false)
 
+const setLocationOpen = ref(false)
+const nearMeOpen = ref(false)
+const originDraggable = ref(false)
+const addressQuery = ref('')
+const addressError = ref<string | null>(null)
+const isResolvingAddress = ref(false)
+const originLabel = ref<string | null>(null)
+const setLocationPanel = ref<HTMLElement | null>(null)
+const nearMePanel = ref<HTMLElement | null>(null)
+
+const searchRadiusM = computed<number | null>(() =>
+  nearbyActive.value ? nearbyRadiusM.value : null,
+)
+
+function placeOriginAt(latlng: { lat: number; lng: number }) {
+  setManualPosition(latlng.lat, latlng.lng)
+  originLabel.value = null
+  void reverseGeocode(latlng).then((label) => {
+    originLabel.value = label
+  })
+  if (nearbyActive.value) {
+    sidebarRef.value?.ensureVisible()
+    void locStore.runNearbySearch(latlng, nearbyRadiusM.value).then((ok) => {
+      if (ok) focusSearchRadius()
+    })
+  }
+}
+
 function onMapClick(latlng: { lat: number; lng: number }) {
+  /*
+  	- While placing the search origin, map taps move the pin instead of opening
+  	- the add-spot modal.
+  */
+  if (originDraggable.value) {
+    placeOriginAt(latlng)
+    return
+  }
+
   if (locStore.activeFilter === 'discovered') return
   if (locStore.hasPlacesSearchOverlay) return
+  if (setLocationOpen.value || nearMeOpen.value) return
 
   if (!auth.isLoggedIn) {
     auth.openLogin()
@@ -60,20 +104,30 @@ function onMapClick(latlng: { lat: number; lng: number }) {
 
 const {
   position: userPosition,
+  originSource,
   isTracking,
   isLocating,
   error: locationError,
   start: startUserLocation,
+  setManualPosition,
 } = useUserLocation()
 
-const { mapEl, init, reload, focusUserLocation } = useMap({
+function onOriginDragEnd(latlng: { lat: number; lng: number }) {
+  placeOriginAt(latlng)
+}
+
+const { mapEl, init, reload, focusUserLocation, focusSearchRadius } = useMap({
   center: props.center,
   zoom: props.zoom,
   places: mapPlaces,
   selected,
   userPosition,
+  originSource,
+  originDraggable,
+  searchRadiusM,
   onMapClick,
   onSelectPlace: (place) => locStore.selectPlace(place),
+  onOriginDragEnd,
 })
 
 const locateTitle = computed(() => {
@@ -81,21 +135,114 @@ const locateTitle = computed(() => {
   if (locationError.value === 'timeout') return 'Location timed out — try again'
   if (locationError.value === 'unavailable') return 'Location unavailable'
   if (isLocating.value) return 'Finding your location…'
-  if (isTracking.value) return 'Center on my location'
+  if (isTracking.value || originSource.value === 'gps') return 'Center on my location'
   return 'Show my location'
 })
 
+const hasOrigin = computed(() => userPosition.value != null)
+
+const originStatusText = computed(() => {
+  if (!userPosition.value) return 'No location set yet'
+  if (originSource.value === 'manual') {
+    return originLabel.value ?? 'Custom location (drag or address)'
+  }
+  return 'Using GPS location'
+})
+
+function formatRadius(meters: NearbyRadiusM): string {
+  if (meters < 1000) return `${meters}m`
+  return `${meters / 1000}km`
+}
+
 async function onLocateClick() {
-  if (isTracking.value && userPosition.value) {
+  setLocationOpen.value = false
+  nearMeOpen.value = false
+  originDraggable.value = false
+
+  if ((isTracking.value || originSource.value === 'gps') && userPosition.value) {
     focusUserLocation()
     return
   }
 
   const pos = await startUserLocation()
-  if (pos) focusUserLocation()
+  if (pos) {
+    originLabel.value = null
+    focusUserLocation()
+  }
 }
 
-async function saveLabeledPin(payload: { name: string; category: string; description: string }) {
+function toggleSetLocation() {
+  nearMeOpen.value = false
+  setLocationOpen.value = !setLocationOpen.value
+}
+
+function toggleNearMe() {
+  setLocationOpen.value = false
+  nearMeOpen.value = !nearMeOpen.value
+}
+
+function toggleDragPin() {
+  if (!userPosition.value) {
+    const center = props.center ?? ([1.3521, 103.8198] as LatLngTuple)
+    setManualPosition(center[0], center[1])
+    originLabel.value = 'Map center - drag or tap to adjust'
+    focusUserLocation()
+  }
+  originDraggable.value = !originDraggable.value
+  if (originDraggable.value) setLocationOpen.value = true
+}
+
+function finishPlacingOrigin() {
+  originDraggable.value = false
+}
+
+async function submitAddressLocation() {
+  addressError.value = null
+  const term = addressQuery.value.trim()
+  if (!term) {
+    addressError.value = 'Enter an address or place name'
+    return
+  }
+
+  isResolvingAddress.value = true
+  const hit = await forwardGeocode(term)
+  isResolvingAddress.value = false
+
+  if (!hit) {
+    addressError.value = 'Could not find that place in Singapore'
+    return
+  }
+
+  setManualPosition(hit.lat, hit.lng)
+  originLabel.value = hit.label
+  originDraggable.value = false
+  addressQuery.value = ''
+  focusUserLocation()
+}
+
+async function runNearMeSearch(radius: NearbyRadiusM = nearbyRadiusM.value) {
+  if (!userPosition.value) {
+    nearMeOpen.value = true
+    return
+  }
+
+  locStore.setNearbyRadius(radius)
+  sidebarRef.value?.ensureVisible()
+  const ok = await locStore.runNearbySearch(userPosition.value, radius)
+  if (ok) focusSearchRadius()
+}
+
+function clearNearby() {
+  locStore.clearNearbySearch()
+  nearMeOpen.value = false
+}
+
+async function saveLabeledPin(payload: {
+  name: string
+  category: string
+  description: string
+  listStatus: ListStatus
+}) {
   if (!pendingCoord.value) return
 
   pinError.value = null
@@ -109,6 +256,7 @@ async function saveLabeledPin(payload: { name: string; category: string; descrip
     location,
     category: payload.category,
     description: payload.description,
+    listStatus: payload.listStatus,
   })
 
   if (!place) {
@@ -121,8 +269,8 @@ async function saveLabeledPin(payload: { name: string; category: string; descrip
   locStore.selectPlace(place)
 }
 
-async function saveSelectedSearchResult() {
-  await locStore.saveSearchResult()
+async function saveSelectedSearchResult(listStatus: ListStatus = 'to_try') {
+  await locStore.saveSearchResult(listStatus)
 }
 
 function cancelPinLabel() {
@@ -133,8 +281,36 @@ function cancelPinLabel() {
   resolvingAddress.value = false
 }
 
+function onDocumentPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+
+  /*
+  	- Outside click closes the set-location panel, but keeps drag mode so map
+  	- taps/drags still move the origin instead of opening add-spot.
+  */
+  if (
+    setLocationOpen.value &&
+    setLocationPanel.value &&
+    !setLocationPanel.value.contains(target)
+  ) {
+    const btn = (target as HTMLElement).closest?.('.map-control--set-location')
+    if (!btn) setLocationOpen.value = false
+  }
+
+  if (nearMeOpen.value && nearMePanel.value && !nearMePanel.value.contains(target)) {
+    const btn = (target as HTMLElement).closest?.('.map-control--near-me')
+    if (!btn) nearMeOpen.value = false
+  }
+}
+
 onMounted(() => {
   init()
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 
 /*
@@ -154,8 +330,17 @@ void mapEl
         <div ref="mapEl" class="map-el"></div>
 
         <div class="map-hint">
-          <i class="mdi mdi-cursor-default-click"></i>
-          <template v-if="locStore.activeFilter === 'discovered'">
+          <i
+            :class="
+              originDraggable
+                ? 'mdi mdi-cursor-move'
+                : 'mdi mdi-cursor-default-click'
+            "
+          ></i>
+          <template v-if="originDraggable">
+            Drag the orange pin, or tap the map to place your search location
+          </template>
+          <template v-else-if="locStore.activeFilter === 'discovered'">
             Browse discoveries from the sidebar or map pins
           </template>
           <template v-else>
@@ -180,7 +365,7 @@ void mapEl
           class="map-control map-control--locate"
           type="button"
           :class="{
-            'map-control--active': isTracking && !locationError,
+            'map-control--active': (isTracking || originSource === 'gps') && !locationError,
             'map-control--error': !!locationError,
           }"
           :title="locateTitle"
@@ -193,6 +378,139 @@ void mapEl
           ></i>
         </button>
 
+        <button
+          class="map-control map-control--set-location"
+          type="button"
+          :class="{
+            'map-control--active': setLocationOpen || originSource === 'manual' || originDraggable,
+          }"
+          title="Set search location"
+          aria-label="Set search location"
+          :aria-expanded="setLocationOpen"
+          @click.stop="toggleSetLocation"
+        >
+          <i class="mdi mdi-map-marker-radius-outline"></i>
+        </button>
+
+        <button
+          class="map-control map-control--near-me"
+          type="button"
+          :class="{
+            'map-control--active': nearMeOpen || nearbyActive,
+          }"
+          title="Find restaurants nearby"
+          aria-label="Find restaurants nearby"
+          :aria-expanded="nearMeOpen"
+          :disabled="isSearchingPlaces && nearbyActive"
+          @click.stop="toggleNearMe"
+        >
+          <i
+            :class="
+              isSearchingPlaces && nearbyActive
+                ? 'mdi mdi-loading mdi-spin'
+                : 'mdi mdi-store-search-outline'
+            "
+          ></i>
+        </button>
+
+        <div
+          v-if="setLocationOpen"
+          ref="setLocationPanel"
+          class="map-panel map-panel--set-location"
+          @click.stop
+        >
+          <p class="map-panel-title">Set location</p>
+          <p class="map-panel-status">{{ originStatusText }}</p>
+          <form class="map-panel-form" @submit.prevent="submitAddressLocation">
+            <input
+              v-model="addressQuery"
+              class="map-panel-input"
+              type="text"
+              placeholder="Address or place in Singapore"
+              autocomplete="off"
+              :disabled="isResolvingAddress"
+            />
+            <button
+              class="map-panel-btn"
+              type="submit"
+              :disabled="isResolvingAddress"
+            >
+              {{ isResolvingAddress ? 'Finding…' : 'Go' }}
+            </button>
+          </form>
+          <p v-if="addressError" class="map-panel-error">{{ addressError }}</p>
+          <button
+            class="map-panel-btn map-panel-btn--secondary"
+            type="button"
+            :class="{ 'map-panel-btn--active': originDraggable }"
+            @click="toggleDragPin"
+          >
+            <i class="mdi mdi-cursor-move"></i>
+            {{ originDraggable ? 'Placing pin…' : 'Place pin on map' }}
+          </button>
+          <button
+            v-if="originDraggable"
+            class="map-panel-btn"
+            type="button"
+            @click="finishPlacingOrigin"
+          >
+            Done placing
+          </button>
+          <p v-if="originDraggable" class="map-panel-status">
+            Drag the orange pin, or tap anywhere on the map to move it.
+          </p>
+        </div>
+
+        <div
+          v-if="nearMeOpen"
+          ref="nearMePanel"
+          class="map-panel map-panel--near-me"
+          @click.stop
+        >
+          <p class="map-panel-title">Near me</p>
+          <p class="map-panel-status">
+            {{
+              hasOrigin
+                ? 'Choose a radius, then search for restaurants'
+                : 'Set or locate your position first'
+            }}
+          </p>
+          <div class="map-panel-radii">
+            <button
+              v-for="radius in NEARBY_RADIUS_PRESETS"
+              :key="radius"
+              class="map-panel-chip"
+              type="button"
+              :class="{ 'map-panel-chip--active': nearbyRadiusM === radius }"
+              :disabled="!hasOrigin || isSearchingPlaces"
+              @click="runNearMeSearch(radius)"
+            >
+              {{ formatRadius(radius) }}
+            </button>
+          </div>
+          <div class="map-panel-actions">
+            <button
+              class="map-panel-btn"
+              type="button"
+              :disabled="!hasOrigin || isSearchingPlaces"
+              @click="runNearMeSearch()"
+            >
+              {{ isSearchingPlaces && nearbyActive ? 'Searching…' : 'Search nearby' }}
+            </button>
+            <button
+              v-if="nearbyActive"
+              class="map-panel-btn map-panel-btn--secondary"
+              type="button"
+              @click="clearNearby"
+            >
+              Clear
+            </button>
+          </div>
+          <p v-if="locStore.placesSearchError && nearbyActive" class="map-panel-error">
+            {{ locStore.placesSearchError }}
+          </p>
+        </div>
+
         <Transition name="focus-card">
           <div
             class="focus-card"
@@ -203,10 +521,12 @@ void mapEl
           >
             <template v-if="locStore.selectedSearchResult">
               <div class="focus-card-icon">
-                <i class="mdi mdi-magnify"></i>
+                <i :class="nearbyActive ? 'mdi mdi-store-search-outline' : 'mdi mdi-magnify'"></i>
               </div>
               <div class="focus-card-body">
-                <p class="focus-card-label">Search result</p>
+                <p class="focus-card-label">
+                  {{ nearbyActive ? 'Nearby result' : 'Search result' }}
+                </p>
                 <p class="focus-card-title">{{ locStore.selectedSearchResult.name }}</p>
                 <dl class="focus-details">
                   <div>
@@ -229,17 +549,28 @@ void mapEl
                     </dd>
                   </div>
                 </dl>
-                <button
-                  class="focus-card-save"
-                  type="button"
-                  :disabled="locStore.isSaving"
-                  @click="saveSelectedSearchResult"
-                >
-                  <i
-                    :class="locStore.isSaving ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-bookmark-outline'"
-                  ></i>
-                  {{ locStore.isSaving ? 'Saving…' : 'Save to my spots' }}
-                </button>
+                <div class="focus-card-actions">
+                  <button
+                    class="focus-card-save"
+                    type="button"
+                    :disabled="locStore.isSaving"
+                    @click="saveSelectedSearchResult('to_try')"
+                  >
+                    <i
+                      :class="locStore.isSaving ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-bookmark-outline'"
+                    ></i>
+                    {{ locStore.isSaving ? 'Saving…' : 'Save to try' }}
+                  </button>
+                  <button
+                    class="focus-card-save focus-card-save--secondary"
+                    type="button"
+                    :disabled="locStore.isSaving"
+                    @click="saveSelectedSearchResult('tried')"
+                  >
+                    <i class="mdi mdi-check-circle-outline"></i>
+                    Save as tried
+                  </button>
+                </div>
                 <p v-if="locStore.actionError" class="focus-card-error">
                   {{ locStore.actionError }}
                 </p>
@@ -321,10 +652,18 @@ void mapEl
 
             <template v-else-if="locStore.selected">
               <div class="focus-card-icon">
-                <i class="mdi mdi-silverware-fork-knife"></i>
+                <i
+                  :class="
+                    locStore.selected.listStatus === 'tried'
+                      ? 'mdi mdi-check-circle-outline'
+                      : 'mdi mdi-silverware-fork-knife'
+                  "
+                ></i>
               </div>
               <div class="focus-card-body">
-                <p class="focus-card-label">Selected spot</p>
+                <p class="focus-card-label">
+                  {{ locStore.selected.listStatus === 'tried' ? 'Tried spot' : 'To-try spot' }}
+                </p>
                 <p class="focus-card-title">{{ locStore.selected.name }}</p>
                 <div class="focus-card-location">
                   <i class="mdi mdi-map-marker-outline"></i>
@@ -339,6 +678,35 @@ void mapEl
                 >
                   {{ locStore.selected.category }}
                 </span>
+                <button
+                  class="focus-card-save"
+                  type="button"
+                  :disabled="locStore.isUpdatingListStatus"
+                  @click="
+                    locStore.setPlaceListStatus(
+                      locStore.selected,
+                      locStore.selected.listStatus === 'tried' ? 'to_try' : 'tried',
+                    )
+                  "
+                >
+                  <i
+                    :class="
+                      locStore.isUpdatingListStatus
+                        ? 'mdi mdi-loading mdi-spin'
+                        : locStore.selected.listStatus === 'tried'
+                          ? 'mdi mdi-bookmark-outline'
+                          : 'mdi mdi-check-circle-outline'
+                    "
+                  ></i>
+                  <template v-if="locStore.isUpdatingListStatus">Updating…</template>
+                  <template v-else-if="locStore.selected.listStatus === 'tried'">
+                    Move to to-try
+                  </template>
+                  <template v-else>Mark as tried</template>
+                </button>
+                <p v-if="locStore.actionError" class="focus-card-error">
+                  {{ locStore.actionError }}
+                </p>
               </div>
               <button
                 class="focus-card-close"
@@ -466,10 +834,27 @@ void mapEl
   top: 64px;
 }
 
-.map-control--locate.map-control--active {
+.map-control--set-location {
+  top: 112px;
+}
+
+.map-control--near-me {
+  top: 160px;
+}
+
+.map-control--locate.map-control--active,
+.map-control--set-location.map-control--active,
+.map-control--near-me.map-control--active {
   color: #2B6CB0;
   border-color: rgba(49, 130, 206, 0.35);
   background: rgba(235, 248, 255, 0.92);
+}
+
+.map-control--set-location.map-control--active,
+.map-control--near-me.map-control--active {
+  color: #C05621;
+  border-color: rgba(221, 107, 32, 0.35);
+  background: rgba(255, 250, 240, 0.94);
 }
 
 .map-control--locate.map-control--active:hover {
@@ -479,15 +864,186 @@ void mapEl
   box-shadow: 0 4px 14px rgba(49, 130, 206, 0.35);
 }
 
+.map-control--set-location.map-control--active:hover,
+.map-control--near-me.map-control--active:hover {
+  background: #DD6B20;
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(221, 107, 32, 0.35);
+}
+
 .map-control--locate.map-control--error {
   color: var(--danger);
   border-color: rgba(192, 57, 43, 0.3);
   background: var(--danger-bg);
 }
 
-.map-control--locate:disabled {
+.map-control--locate:disabled,
+.map-control--near-me:disabled {
   cursor: wait;
   opacity: 0.85;
+}
+
+.map-panel {
+  position: absolute;
+  right: 64px;
+  z-index: 520;
+  width: min(280px, calc(100% - 80px));
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-panel--set-location {
+  top: 112px;
+}
+
+.map-panel--near-me {
+  top: 160px;
+}
+
+.map-panel-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.map-panel-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.map-panel-form {
+  display: flex;
+  gap: 6px;
+}
+
+.map-panel-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: white;
+}
+
+.map-panel-input:focus {
+  outline: none;
+  border-color: rgba(221, 107, 32, 0.55);
+  box-shadow: 0 0 0 3px rgba(221, 107, 32, 0.12);
+}
+
+.map-panel-btn {
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  background: #DD6B20;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.map-panel-btn:hover:not(:disabled) {
+  background: #C05621;
+}
+
+.map-panel-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.map-panel-btn--secondary {
+  width: 100%;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.map-panel-btn--secondary:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+}
+
+.map-panel-btn--active {
+  color: #C05621;
+  background: rgba(255, 250, 240, 0.98);
+  box-shadow: inset 0 0 0 1px rgba(221, 107, 32, 0.35);
+}
+
+.map-panel-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.map-panel-radii {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-panel-chip {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-full);
+  background: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.map-panel-chip:hover:not(:disabled) {
+  border-color: rgba(221, 107, 32, 0.45);
+  color: #C05621;
+}
+
+.map-panel-chip--active {
+  color: white;
+  background: #DD6B20;
+  border-color: #DD6B20;
+}
+
+.map-panel-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.map-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.map-panel-actions .map-panel-btn {
+  flex: 1;
+}
+
+.map-panel-actions .map-panel-btn--secondary {
+  width: auto;
 }
 
 .focus-card {
@@ -575,6 +1131,29 @@ void mapEl
   cursor: pointer;
   box-shadow: var(--shadow-glow);
   transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
+}
+
+.focus-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.focus-card-actions .focus-card-save {
+  margin-top: 0;
+}
+
+.focus-card-save--secondary {
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid rgba(15, 110, 86, 0.25);
+  box-shadow: none;
+}
+
+.focus-card-save--secondary:hover:not(:disabled) {
+  background: var(--accent-bg);
+  box-shadow: none;
 }
 
 .focus-card-save:hover:not(:disabled) {

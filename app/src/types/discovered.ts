@@ -51,5 +51,6 @@ export function discoveredToPlace(d: DiscoveredPlace): Place {
     location: d.formatted_address,
     category: d.source_category?.trim() || 'Discovered',
     description: bits.join(' · ') || d.restaurant_name,
+    listStatus: 'to_try',
   }
 }

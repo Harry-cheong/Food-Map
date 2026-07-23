@@ -3,6 +3,7 @@ import { ref, watch, onBeforeUnmount } from 'vue'
 import { useLocationStore } from '../stores/location'
 import { categoryChipStyle } from '../constants/categories'
 import type { DiscoveredPlace } from '../types/discovered'
+import type { PlaceSearchResult } from '../types/placesSearch'
 
 const locStore = useLocationStore()
 const sentinel = ref<HTMLElement | null>(null)
@@ -38,6 +39,18 @@ onBeforeUnmount(() => {
   observer?.disconnect()
 })
 
+function formatNearbyRadius(meters: number): string {
+  if (meters < 1000) return `${meters}m`
+  return `${meters / 1000}km`
+}
+
+function formatSearchRating(place: PlaceSearchResult): string | null {
+  if (place.rating == null) return null
+  const count =
+    place.user_rating_count != null ? ` · ${place.user_rating_count} reviews` : ''
+  return `★ ${place.rating.toFixed(1)}${count}`
+}
+
 function formatRating(place: DiscoveredPlace): string | null {
   if (place.rating == null) return null
   const count =
@@ -52,7 +65,114 @@ function formatStatus(status: string | null): string | null {
 </script>
 
 <template>
-  <div v-if="locStore.activeFilter === 'following'" class="empty-state">
+  <div v-if="locStore.nearbyActive" class="nearby-panel">
+    <div
+      v-if="locStore.isSearchingPlaces"
+      class="empty-state"
+    >
+      <div class="empty-icon loading-spin">
+        <i class="mdi mdi-loading"></i>
+      </div>
+      <p class="empty-title">Searching nearby…</p>
+      <p class="empty-hint">Looking for restaurants around your location.</p>
+    </div>
+
+    <div
+      v-else-if="locStore.placesSearchError"
+      class="empty-state"
+    >
+      <div class="empty-icon">
+        <i class="mdi mdi-alert-circle-outline"></i>
+      </div>
+      <p class="empty-title">Search failed</p>
+      <p class="empty-hint">{{ locStore.placesSearchError }}</p>
+      <button type="button" class="empty-action" @click="locStore.clearNearbySearch()">
+        Dismiss
+      </button>
+    </div>
+
+    <div
+      v-else-if="locStore.placesSearchResults.length === 0"
+      class="empty-state"
+    >
+      <div class="empty-icon">
+        <i class="mdi mdi-store-search-outline"></i>
+      </div>
+      <p class="empty-title">No restaurants nearby</p>
+      <p class="empty-hint">
+        Nothing found within {{ formatNearbyRadius(locStore.nearbyRadiusM) }}. Try a larger radius.
+      </p>
+      <button type="button" class="empty-action" @click="locStore.clearNearbySearch()">
+        Clear nearby search
+      </button>
+    </div>
+
+    <div
+      v-else-if="
+        locStore.filteredNearbyResults.length === 0 &&
+        (locStore.searchQuery.trim() ||
+          locStore.nearbyMinRating != null ||
+          locStore.nearbyMinReviews != null)
+      "
+      class="empty-state"
+    >
+      <div class="empty-icon">
+        <i class="mdi mdi-magnify"></i>
+      </div>
+      <p class="empty-title">No matches</p>
+      <p class="empty-hint">
+        No nearby restaurants match your text, rating, or review filters.
+      </p>
+      <button
+        type="button"
+        class="empty-action"
+        @click="
+          locStore.setSearchQuery('');
+          locStore.setNearbyMinRating(null);
+          locStore.setNearbyMinReviews(null)
+        "
+      >
+        Clear filters
+      </button>
+    </div>
+
+    <TransitionGroup v-else name="list" tag="div" class="place-list">
+      <div
+        v-for="place in locStore.filteredNearbyResults"
+        :key="place.google_place_id"
+        class="sidebar-item"
+        :class="{
+          'sidebar-item--selected':
+            locStore.selectedSearchResult?.google_place_id === place.google_place_id,
+        }"
+        @click="locStore.selectSearchResult(place)"
+      >
+        <div class="sidebar-label">
+          <div class="icon-wrap icon-wrap--nearby">
+            <i class="mdi mdi-store-search-outline"></i>
+          </div>
+          <div class="sidebar-info-box">
+            <p class="sidebar-name">{{ place.name }}</p>
+            <div class="sidebar-location">
+              <i class="mdi mdi-map-marker-outline"></i>
+              {{ place.formatted_address }}
+            </div>
+            <div class="sidebar-meta">
+              <span class="sidebar-category sidebar-category--nearby">Restaurant</span>
+              <span v-if="formatSearchRating(place)" class="sidebar-rating">
+                {{ formatSearchRating(place) }}
+              </span>
+              <span v-if="formatStatus(place.business_status)" class="sidebar-status">
+                {{ formatStatus(place.business_status) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </TransitionGroup>
+  </div>
+
+  <div v-else-if="locStore.activeFilter === 'following'" class="empty-state">
     <div class="empty-icon">
       <i class="mdi mdi-account-group-outline"></i>
     </div>
@@ -179,6 +299,43 @@ function formatStatus(status: string | null): string | null {
     </button>
   </div>
 
+  <div
+    v-else-if="locStore.personalPlaces.length === 0 && locStore.places.length > 0"
+    class="empty-state"
+  >
+    <div class="empty-icon">
+      <i
+        :class="
+          locStore.personalListFilter === 'tried'
+            ? 'mdi mdi-check-circle-outline'
+            : 'mdi mdi-bookmark-outline'
+        "
+      ></i>
+    </div>
+    <p class="empty-title">
+      {{ locStore.personalListFilter === 'tried' ? 'Nothing tried yet' : 'Nothing to try yet' }}
+    </p>
+    <p class="empty-hint">
+      <template v-if="locStore.personalListFilter === 'tried'">
+        Mark a spot as tried from the focus card when you’ve been.
+      </template>
+      <template v-else>
+        Save a spot from the map, search, or nearby results to build this list.
+      </template>
+    </p>
+    <button
+      type="button"
+      class="empty-action"
+      @click="
+        locStore.setPersonalListFilter(
+          locStore.personalListFilter === 'tried' ? 'to_try' : 'tried',
+        )
+      "
+    >
+      Switch to {{ locStore.personalListFilter === 'tried' ? 'To try' : 'Tried' }}
+    </button>
+  </div>
+
   <div v-else-if="locStore.places.length === 0" class="empty-state">
     <div class="empty-icon">
       <i class="mdi mdi-map-marker-plus-outline"></i>
@@ -206,8 +363,19 @@ function formatStatus(status: string | null): string | null {
       </button>
 
       <div class="sidebar-label">
-        <div class="icon-wrap">
-          <i class="mdi mdi-silverware-fork-knife"></i>
+        <div
+          class="icon-wrap"
+          :class="{
+            'icon-wrap--tried': place.listStatus === 'tried',
+          }"
+        >
+          <i
+            :class="
+              place.listStatus === 'tried'
+                ? 'mdi mdi-check-circle-outline'
+                : 'mdi mdi-silverware-fork-knife'
+            "
+          ></i>
         </div>
         <div class="sidebar-info-box">
           <p class="sidebar-name">{{ place.name }}</p>
@@ -215,15 +383,27 @@ function formatStatus(status: string | null): string | null {
             <i class="mdi mdi-map-marker-outline"></i>
             {{ place.location }}
           </div>
-          <span
-            class="sidebar-category"
-            :style="{
-              backgroundColor: categoryChipStyle(place.category).bg,
-              color: categoryChipStyle(place.category).color,
-            }"
-          >
-            {{ place.category }}
-          </span>
+          <div class="sidebar-meta">
+            <span
+              class="sidebar-category"
+              :style="{
+                backgroundColor: categoryChipStyle(place.category).bg,
+                color: categoryChipStyle(place.category).color,
+              }"
+            >
+              {{ place.category }}
+            </span>
+            <span
+              class="sidebar-list-badge"
+              :class="
+                place.listStatus === 'tried'
+                  ? 'sidebar-list-badge--tried'
+                  : 'sidebar-list-badge--to-try'
+              "
+            >
+              {{ place.listStatus === 'tried' ? 'Tried' : 'To try' }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -297,6 +477,27 @@ function formatStatus(status: string | null): string | null {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+}
+
+.nearby-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.icon-wrap--nearby {
+  background: rgba(221, 107, 32, 0.12);
+  color: #C05621;
+}
+
+.sidebar-item--selected .icon-wrap--nearby {
+  background: rgba(221, 107, 32, 0.2);
+  color: #9C4221;
+}
+
+.sidebar-category--nearby {
+  background: rgba(221, 107, 32, 0.12);
+  color: #C05621;
 }
 
 .place-list {
@@ -391,6 +592,11 @@ function formatStatus(status: string | null): string | null {
   box-shadow: var(--shadow-glow);
 }
 
+.icon-wrap--tried {
+  background: rgba(15, 110, 86, 0.1);
+  color: var(--accent);
+}
+
 .sidebar-info-box {
   display: flex;
   flex-direction: column;
@@ -431,6 +637,24 @@ function formatStatus(status: string | null): string | null {
   width: fit-content;
   border-radius: var(--radius-full);
   letter-spacing: 0.01em;
+}
+
+.sidebar-list-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.01em;
+}
+
+.sidebar-list-badge--to-try {
+  background: rgba(221, 107, 32, 0.12);
+  color: #C05621;
+}
+
+.sidebar-list-badge--tried {
+  background: rgba(15, 110, 86, 0.12);
+  color: var(--accent);
 }
 
 .sidebar-rating,

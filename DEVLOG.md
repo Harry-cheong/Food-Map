@@ -119,6 +119,16 @@
 - README: dropped stale Instagram webhook / ngrok steps; documented the current
   `app/` + `food-scraper-pipeline/` layout and PostGIS / backend / frontend setup
 
+## 2026-07-19
+**frontend** | Goal: show the user's live location on the map
+
+- Opt-in "Locate me" control on the map: first tap requests permission via
+  `watchPosition`, places a blue-dot + accuracy circle, and flies once to you
+- While tracking, the marker updates as you move without auto-panning; tapping
+  again recenters only
+- `useUserLocation` owns geolocation state; `useMap` keeps the user marker
+  separate from place pins; works for guests and signed-in users
+
 ## 2026-07-22
 **full-stack** | Goal: let users search restaurants via Google Places from the header
 
@@ -131,12 +141,26 @@
   (opens auth if signed out); saved pin lands in Personal and clears the search overlay
 - Sidebar Personal / Discovered search unchanged; header owns live Google lookup
 
-## 2026-07-19
-**frontend** | Goal: show the user's live location on the map
+## 2026-07-22
+**full-stack** | Goal: search restaurants in a radius around a set location
 
-- Opt-in "Locate me" control on the map: first tap requests permission via
-  `watchPosition`, places a blue-dot + accuracy circle, and flies once to you
-- While tracking, the marker updates as you move without auto-panning; tapping
-  again recenters only
-- `useUserLocation` owns geolocation state; `useMap` keeps the user marker
-  separate from place pins; works for guests and signed-in users
+- Backend: `GET /places/nearby?lat=&lng=&radius=` proxies Places Nearby Search
+  with a hard circle restriction; same result shape as text search
+- Map controls below Locate: **Set location** (address via Nominatim or drag pin)
+  and **Near me** (radius presets 500m / 1km / 2km / 5km)
+- Nearby hits reuse the Places search overlay + focus card save flow; dashed
+  radius circle drawn on the map while nearby mode is active
+- Sidebar lists nearby results (name, address, rating) so users can browse without
+  tapping every map pin; Clear returns to Personal / Discovered
+- Manual origin stops GPS tracking so the pin stays put; GPS locate resumes live tracking
+
+## 2026-07-22
+**full-stack** | Goal: split Personal into to-try vs already-tried lists
+
+- DB: `user_fav.list_status` (`to_try` | `tried`, default `to_try`); migration in
+  `database/migrate_list_status.sql` for existing databases
+- Backend: accept `list_status` on `POST /items`; `PATCH /items/{id}` moves a spot
+  between lists
+- Sidebar Personal sub-chips **To try** / **Tried** filter list + map markers;
+  pin modal and search focus card choose which list on save; focus card can
+  mark tried / move back to to-try
