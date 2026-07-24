@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS user_fav (
     category             TEXT             NOT NULL,
     public               BOOLEAN          NOT NULL DEFAULT FALSE,
     list_status          TEXT             NOT NULL DEFAULT 'to_try',
+    /*
+    	- Shared restaurant identity with discovered_places / Places API.
+    	- NULL for manual map pins that have no Google place id.
+    */
+    google_place_id      TEXT,
     submitted_by_user_id INTEGER          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     created_at           TIMESTAMPTZ      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -65,6 +70,11 @@ CREATE INDEX IF NOT EXISTS idx_user_fav_category
 -- Filter personal list by to-try / tried
 CREATE INDEX IF NOT EXISTS idx_user_fav_list_status
     ON user_fav (submitted_by_user_id, list_status);
+
+-- One save per user per Google place (manual pins with NULL id are unconstrained)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_fav_user_google_place
+    ON user_fav (submitted_by_user_id, google_place_id)
+    WHERE google_place_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- discovered_places — HGW articles confirmed via Google Places API

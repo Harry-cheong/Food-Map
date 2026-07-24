@@ -1,43 +1,10 @@
 <script lang="ts" setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
 import { useLocationStore } from '../stores/location'
 import { categoryChipStyle } from '../constants/categories'
-import type { DiscoveredPlace } from '../types/discovered'
+import { googleSearchUrl } from '../utils/googleSearch'
 import type { PlaceSearchResult } from '../types/placesSearch'
 
 const locStore = useLocationStore()
-const sentinel = ref<HTMLElement | null>(null)
-let observer: IntersectionObserver | null = null
-
-function bindObserver(el: HTMLElement | null) {
-  observer?.disconnect()
-  observer = null
-  if (!el) return
-
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return
-      if (locStore.activeFilter !== 'discovered') return
-      if (!locStore.discoveredHasMore || locStore.isLoadingDiscovered) return
-      void locStore.loadDiscovered()
-    },
-    { root: el.closest('.sidebar-content'), rootMargin: '80px', threshold: 0 },
-  )
-  observer.observe(el)
-}
-
-watch(sentinel, (el) => bindObserver(el), { flush: 'post' })
-
-watch(
-  () => locStore.activeFilter,
-  () => {
-    if (sentinel.value) bindObserver(sentinel.value)
-  },
-)
-
-onBeforeUnmount(() => {
-  observer?.disconnect()
-})
 
 function formatNearbyRadius(meters: number): string {
   if (meters < 1000) return `${meters}m`
@@ -51,16 +18,20 @@ function formatSearchRating(place: PlaceSearchResult): string | null {
   return `★ ${place.rating.toFixed(1)}${count}`
 }
 
-function formatRating(place: DiscoveredPlace): string | null {
-  if (place.rating == null) return null
-  const count =
-    place.user_rating_count != null ? ` · ${place.user_rating_count} reviews` : ''
-  return `★ ${place.rating.toFixed(1)}${count}`
-}
-
 function formatStatus(status: string | null): string | null {
   if (!status) return null
   return status.replace(/_/g, ' ').toLowerCase()
+}
+
+function formatSavedDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 </script>
 
@@ -147,6 +118,17 @@ function formatStatus(status: string | null): string | null {
         }"
         @click="locStore.selectSearchResult(place)"
       >
+        <a
+          class="sidebar-google"
+          :href="googleSearchUrl(place.name, place.formatted_address)"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Search on Google"
+          title="Search on Google"
+          @click.stop
+        >
+          <i class="mdi mdi-google"></i>
+        </a>
         <div class="sidebar-label">
           <div class="icon-wrap icon-wrap--nearby">
             <i class="mdi mdi-store-search-outline"></i>
@@ -183,106 +165,6 @@ function formatStatus(status: string | null): string | null {
     <button type="button" class="empty-action" @click="locStore.setFilter('personal')">
       Back to Personal
     </button>
-  </div>
-
-  <div
-    v-else-if="locStore.activeFilter === 'discovered'"
-    class="discovered-panel"
-  >
-    <div
-      v-if="locStore.discoveredPlaces.length === 0 && locStore.isLoadingDiscovered"
-      class="empty-state"
-    >
-      <div class="empty-icon loading-spin">
-        <i class="mdi mdi-loading"></i>
-      </div>
-      <p class="empty-title">Loading discoveries…</p>
-    </div>
-
-    <div
-      v-else-if="locStore.discoveredPlaces.length === 0 && locStore.searchQuery.trim()"
-      class="empty-state"
-    >
-      <div class="empty-icon">
-        <i class="mdi mdi-magnify"></i>
-      </div>
-      <p class="empty-title">No matches</p>
-      <p class="empty-hint">
-        Nothing discovered matches “{{ locStore.searchQuery.trim() }}”.
-      </p>
-      <button type="button" class="empty-action" @click="locStore.setSearchQuery('')">
-        Clear search
-      </button>
-    </div>
-
-    <div
-      v-else-if="locStore.discoveredPlaces.length === 0"
-      class="empty-state"
-    >
-      <div class="empty-icon">
-        <i class="mdi mdi-compass-outline"></i>
-      </div>
-      <p class="empty-title">No discoveries yet</p>
-      <p class="empty-hint">Run the scraper pipeline to confirm HungryGoWhere spots.</p>
-    </div>
-
-    <TransitionGroup v-else name="list" tag="div" class="place-list">
-      <div
-        v-for="place in locStore.discoveredPlaces"
-        :key="place.id"
-        class="sidebar-item"
-        :class="{
-          'sidebar-item--selected': locStore.selectedDiscovered?.id === place.id,
-        }"
-        @click="locStore.selectDiscovered(place)"
-      >
-        <div class="sidebar-label">
-          <div class="icon-wrap">
-            <i class="mdi mdi-compass-outline"></i>
-          </div>
-          <div class="sidebar-info-box">
-            <p class="sidebar-name">{{ place.google_name || place.restaurant_name }}</p>
-            <div class="sidebar-location">
-              <i class="mdi mdi-map-marker-outline"></i>
-              {{ place.formatted_address }}
-            </div>
-            <div class="sidebar-meta">
-              <span
-                v-if="place.source_category"
-                class="sidebar-category"
-                :style="{
-                  backgroundColor: categoryChipStyle(place.source_category).bg,
-                  color: categoryChipStyle(place.source_category).color,
-                }"
-              >
-                {{ place.source_category }}
-              </span>
-              <span v-if="formatRating(place)" class="sidebar-rating">
-                {{ formatRating(place) }}
-              </span>
-              <span v-if="formatStatus(place.business_status)" class="sidebar-status">
-                {{ formatStatus(place.business_status) }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </TransitionGroup>
-
-    <div
-      v-if="locStore.discoveredPlaces.length > 0"
-      ref="sentinel"
-      class="load-more"
-      aria-hidden="true"
-    >
-      <span v-if="locStore.isLoadingDiscovered" class="load-more-text">
-        <i class="mdi mdi-loading loading-spin"></i>
-        Loading more…
-      </span>
-      <span v-else-if="!locStore.discoveredHasMore" class="load-more-text muted">
-        All {{ locStore.discoveredTotal }} loaded
-      </span>
-    </div>
   </div>
 
   <div
@@ -341,7 +223,7 @@ function formatStatus(status: string | null): string | null {
       <i class="mdi mdi-map-marker-plus-outline"></i>
     </div>
     <p class="empty-title">No places yet</p>
-    <p class="empty-hint">Click anywhere on the map to pin a food spot in Singapore.</p>
+    <p class="empty-hint">Use the + button on the map to pin a food spot in Singapore.</p>
   </div>
 
   <TransitionGroup v-else name="list" tag="div" class="place-list">
@@ -352,6 +234,17 @@ function formatStatus(status: string | null): string | null {
       :class="{ 'sidebar-item--selected': locStore.selected?.uid === place.uid }"
       @click="locStore.selectPlace(place)"
     >
+      <a
+        class="sidebar-google sidebar-google--with-close"
+        :href="googleSearchUrl(place.name, place.location)"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Search on Google"
+        title="Search on Google"
+        @click.stop
+      >
+        <i class="mdi mdi-google"></i>
+      </a>
       <button
         class="sidebar-close"
         type="button"
@@ -362,7 +255,7 @@ function formatStatus(status: string | null): string | null {
         <i class="mdi mdi-close"></i>
       </button>
 
-      <div class="sidebar-label">
+      <div class="sidebar-label sidebar-label--actions">
         <div
           class="icon-wrap"
           :class="{
@@ -402,6 +295,9 @@ function formatStatus(status: string | null): string | null {
               "
             >
               {{ place.listStatus === 'tried' ? 'Tried' : 'To try' }}
+            </span>
+            <span v-if="formatSavedDate(place.createdAt)" class="sidebar-saved-date">
+              Saved {{ formatSavedDate(place.createdAt) }}
             </span>
           </div>
         </div>
@@ -473,11 +369,6 @@ function formatStatus(status: string | null): string | null {
   box-shadow: var(--shadow-glow);
 }
 
-.discovered-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
 
 .nearby-panel {
   display: flex;
@@ -569,7 +460,42 @@ function formatStatus(status: string | null): string | null {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-right: 20px;
+  padding-right: 28px;
+}
+
+.sidebar-label--actions {
+  padding-right: 56px;
+}
+
+.sidebar-google {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  text-decoration: none;
+  transition: opacity var(--transition), color var(--transition), background var(--transition);
+}
+
+.sidebar-google--with-close {
+  right: 36px;
+}
+
+.sidebar-google:hover {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.sidebar-item:hover .sidebar-google {
+  opacity: 1;
 }
 
 .icon-wrap {
@@ -606,12 +532,13 @@ function formatStatus(status: string | null): string | null {
 
 .sidebar-name {
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 650;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .sidebar-location {
@@ -664,6 +591,11 @@ function formatStatus(status: string | null): string | null {
   text-transform: capitalize;
 }
 
+.sidebar-saved-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .sidebar-close {
   position: absolute;
   top: 8px;
@@ -692,24 +624,8 @@ function formatStatus(status: string | null): string | null {
   opacity: 1;
 }
 
-.load-more {
-  display: flex;
-  justify-content: center;
-  padding: 14px 8px 8px;
-  min-height: 28px;
-}
 
-.load-more-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: var(--text-secondary);
-}
 
-.load-more-text.muted {
-  color: var(--text-muted);
-}
 
 .loading-spin {
   animation: spin 0.8s linear infinite;

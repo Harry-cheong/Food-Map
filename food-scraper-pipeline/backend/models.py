@@ -27,6 +27,7 @@ class Item(Base):
     category: Mapped[str] = mapped_column(String, nullable=False)
     public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     list_status: Mapped[str] = mapped_column(String, nullable=False, default="to_try")
+    google_place_id: Mapped[str | None] = mapped_column(String, nullable=True)
     submitted_by_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

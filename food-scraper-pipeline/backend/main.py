@@ -7,12 +7,19 @@ from typing import Literal
 import models, schemas
 import auth
 import jwt
-from database import SessionLocal
+from database import SessionLocal, ensure_user_fav_google_place_id
 import datetime
 import places_search
+from contextlib import asynccontextmanager
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_user_fav_google_place_id()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],      # or ["*"] for all origins
@@ -80,6 +87,24 @@ def create_user(user: schemas.User, db: Session = Depends(get_db)):
 def create_item(item: schemas.ItemBase, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
     payload = item.model_dump()
     payload["named_address"] = payload.pop("location")
+    google_place_id = payload.get("google_place_id")
+
+    # Block duplicate saves of the same Google place for one user.
+    if google_place_id:
+        existing = (
+            db.query(models.Item)
+            .filter(
+                models.Item.submitted_by_user_id == user_id,
+                models.Item.google_place_id == google_place_id,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This place is already on your list",
+            )
+
     db_item = models.Item(
         **payload,
         submitted_by_user_id=user_id,

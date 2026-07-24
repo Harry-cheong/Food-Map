@@ -26,7 +26,7 @@ import {
 } from '../types/place'
 import { useAuthStore } from './auth'
 
-export type PlaceFilter = 'personal' | 'following' | 'discovered'
+export type PlaceFilter = 'personal' | 'following'
 export type PersonalListFilter = 'to_try' | 'tried'
 export type DiscoveredSort = 'recent' | 'rating' | 'reviews'
 export type NearbyRadiusM = 500 | 1000 | 2000 | 5000
@@ -48,6 +48,7 @@ export const useLocationStore = defineStore('loc', () => {
   const discoveredTotal = ref(0)
   const discoveredHasMore = ref(false)
   const discoveredSort = ref<DiscoveredSort>('recent')
+  const discoveredSearchQuery = ref('')
   const selected = ref<Place | null>(null)
   const selectedDiscovered = ref<DiscoveredPlace | null>(null)
   const selectedSearchResult = ref<PlaceSearchResult | null>(null)
@@ -70,7 +71,7 @@ export const useLocationStore = defineStore('loc', () => {
   const isLoadingDiscovered = ref(false)
   const actionError = ref<string | null>(null)
   let authBound = false
-  let searchTimer: ReturnType<typeof setTimeout> | null = null
+  let discoveredSearchTimer: ReturnType<typeof setTimeout> | null = null
   let placesSearchTimer: ReturnType<typeof setTimeout> | null = null
   let placesSearchGeneration = 0
 
@@ -91,11 +92,16 @@ export const useLocationStore = defineStore('loc', () => {
     () => places.value.filter((p) => p.listStatus === 'tried').length,
   )
 
+  const savedGooglePlaceIds = computed(() => {
+    const ids = new Set<string>()
+    for (const place of places.value) {
+      if (place.googlePlaceId) ids.add(place.googlePlaceId)
+    }
+    return ids
+  })
+
   const filteredPlaces = computed(() => {
     if (activeFilter.value === 'following') return []
-    if (activeFilter.value === 'discovered') {
-      return discoveredPlaces.value.map(discoveredToPlace)
-    }
 
     const q = searchQuery.value.trim().toLowerCase()
     if (!q) return personalPlaces.value
@@ -158,7 +164,7 @@ export const useLocationStore = defineStore('loc', () => {
     })
   })
 
-  /** Places currently shown on the map (search overlay, personal, or discovered). */
+  /** Places currently shown on the map (search overlay or personal). */
   const mapPlaces = computed(() => {
     if (hasPlacesSearchOverlay.value) {
       const source = nearbyActive.value
@@ -173,12 +179,29 @@ export const useLocationStore = defineStore('loc', () => {
       }
       return mapped
     }
-    if (activeFilter.value === 'discovered') {
-      return discoveredPlaces.value.map(discoveredToPlace)
-    }
     if (activeFilter.value === 'following') return []
     return personalPlaces.value
   })
+
+  const discoveredMapPlaces = computed(() =>
+    discoveredPlaces.value.map(discoveredToPlace),
+  )
+
+  function isGooglePlaceSaved(googlePlaceId: string | null | undefined): boolean {
+    if (!googlePlaceId) return false
+    return savedGooglePlaceIds.value.has(googlePlaceId)
+  }
+
+  function findByGooglePlaceId(googlePlaceId: string): Place | null {
+    return places.value.find((p) => p.googlePlaceId === googlePlaceId) ?? null
+  }
+
+  async function resolveConflictPlace(googlePlaceId: string): Promise<Place | null> {
+    const existing = findByGooglePlaceId(googlePlaceId)
+    if (existing) return existing
+    await loadMyPlaces()
+    return findByGooglePlaceId(googlePlaceId)
+  }
 
   async function loadMyPlaces(): Promise<boolean> {
     isLoading.value = true
@@ -211,7 +234,7 @@ export const useLocationStore = defineStore('loc', () => {
     const { data, error } = await fetchDiscovered({
       limit: DISCOVERED_PAGE_SIZE,
       offset,
-      q: searchQuery.value,
+      q: discoveredSearchQuery.value,
       sort: discoveredSort.value,
     })
 
@@ -360,7 +383,11 @@ export const useLocationStore = defineStore('loc', () => {
     resetNearbyFilters()
   }
 
-  async function addNewPlace(input: NewPlaceInput): Promise<Place | null> {
+  async function addNewPlace(
+    input: NewPlaceInput,
+    opts: { switchToPersonal?: boolean } = {},
+  ): Promise<Place | null> {
+    const switchToPersonal = opts.switchToPersonal ?? true
     isSaving.value = true
     actionError.value = null
 
@@ -369,17 +396,32 @@ export const useLocationStore = defineStore('loc', () => {
       listStatus: input.listStatus ?? 'to_try',
     }
 
-    const { data, error } = await createItem(placeToCreate(payload, true))
+    if (payload.googlePlaceId && isGooglePlaceSaved(payload.googlePlaceId)) {
+      const existing = findByGooglePlaceId(payload.googlePlaceId)
+      isSaving.value = false
+      return existing
+    }
+
+    const { data, error, status } = await createItem(placeToCreate(payload, true))
     if (!data) {
+      if (status === 409 && payload.googlePlaceId) {
+        const existing = await resolveConflictPlace(payload.googlePlaceId)
+        isSaving.value = false
+        return existing
+      }
       actionError.value = error ?? 'Could not save this spot. Try again.'
       isSaving.value = false
       return null
     }
 
     const place = itemToPlace(data)
-    places.value.push(place)
-    personalListFilter.value = place.listStatus
-    activeFilter.value = 'personal'
+    if (!places.value.some((p) => p.uid === place.uid)) {
+      places.value.push(place)
+    }
+    if (switchToPersonal) {
+      personalListFilter.value = place.listStatus
+      activeFilter.value = 'personal'
+    }
     isSaving.value = false
     return place
   }
@@ -394,6 +436,10 @@ export const useLocationStore = defineStore('loc', () => {
     if (!auth.isLoggedIn) {
       auth.openLogin()
       return null
+    }
+
+    if (isGooglePlaceSaved(result.google_place_id)) {
+      return findByGooglePlaceId(result.google_place_id)
     }
 
     const bits: string[] = []
@@ -413,6 +459,7 @@ export const useLocationStore = defineStore('loc', () => {
       category: 'Restaurant',
       description: bits.join(' · '),
       listStatus,
+      googlePlaceId: result.google_place_id,
     })
 
     if (!place) return null
@@ -422,6 +469,44 @@ export const useLocationStore = defineStore('loc', () => {
     selected.value = place
     selectedDiscovered.value = null
     return place
+  }
+
+  async function saveDiscoveredPlace(
+    place: DiscoveredPlace,
+  ): Promise<Place | null> {
+    const auth = useAuthStore()
+    if (!auth.isLoggedIn) {
+      auth.openLogin()
+      return null
+    }
+
+    if (isGooglePlaceSaved(place.google_place_id)) {
+      return findByGooglePlaceId(place.google_place_id)
+    }
+
+    const bits: string[] = []
+    if (place.rating != null) {
+      const ratings =
+        place.user_rating_count != null
+          ? ` (${place.user_rating_count} reviews)`
+          : ''
+      bits.push(`★ ${place.rating.toFixed(1)}${ratings}`)
+    }
+    if (place.source_title) bits.push(place.source_title)
+
+    return addNewPlace(
+      {
+        name: place.google_name || place.restaurant_name,
+        lat: place.lat,
+        lng: place.lng,
+        location: place.formatted_address,
+        category: place.source_category?.trim() || 'Discovered',
+        description: bits.join(' · ') || place.restaurant_name,
+        listStatus: 'to_try',
+        googlePlaceId: place.google_place_id,
+      },
+      { switchToPersonal: false },
+    )
   }
 
   async function setPlaceListStatus(
@@ -458,7 +543,6 @@ export const useLocationStore = defineStore('loc', () => {
   }
 
   async function deletePlace(place: Place): Promise<boolean> {
-    if (activeFilter.value === 'discovered') return false
     if (hasPlacesSearchOverlay.value) return false
 
     isDeleting.value = true
@@ -503,12 +587,7 @@ export const useLocationStore = defineStore('loc', () => {
 
     selected.value = place
     selectedSearchResult.value = null
-    if (activeFilter.value === 'discovered' && place.id != null) {
-      selectedDiscovered.value =
-        discoveredPlaces.value.find((d) => d.id === place.id) ?? null
-    } else {
-      selectedDiscovered.value = null
-    }
+    selectedDiscovered.value = null
   }
 
   function selectDiscovered(place: DiscoveredPlace) {
@@ -533,14 +612,18 @@ export const useLocationStore = defineStore('loc', () => {
     searchQuery.value = query
   }
 
+  function setDiscoveredSearchQuery(query: string) {
+    discoveredSearchQuery.value = query
+    if (discoveredSearchTimer) clearTimeout(discoveredSearchTimer)
+    discoveredSearchTimer = setTimeout(() => {
+      void loadDiscovered({ reset: true })
+    }, 300)
+  }
+
   function setFilter(filter: PlaceFilter) {
     if (activeFilter.value === filter) return
     activeFilter.value = filter
     clearSelection()
-
-    if (filter === 'discovered') {
-      void loadDiscovered({ reset: true })
-    }
   }
 
   function setPersonalListFilter(filter: PersonalListFilter) {
@@ -552,9 +635,7 @@ export const useLocationStore = defineStore('loc', () => {
   function setDiscoveredSort(sort: DiscoveredSort) {
     if (discoveredSort.value === sort) return
     discoveredSort.value = sort
-    if (activeFilter.value === 'discovered') {
-      void loadDiscovered({ reset: true })
-    }
+    void loadDiscovered({ reset: true })
   }
 
   function clearPlaces() {
@@ -585,15 +666,6 @@ export const useLocationStore = defineStore('loc', () => {
       },
     )
 
-    watch(searchQuery, () => {
-      if (nearbyActive.value) return
-      if (activeFilter.value !== 'discovered') return
-      if (searchTimer) clearTimeout(searchTimer)
-      searchTimer = setTimeout(() => {
-        void loadDiscovered({ reset: true })
-      }, 300)
-    })
-
     if (auth.isLoggedIn) {
       void loadMyPlaces()
     }
@@ -605,6 +677,8 @@ export const useLocationStore = defineStore('loc', () => {
     discoveredTotal,
     discoveredHasMore,
     discoveredSort,
+    discoveredSearchQuery,
+    discoveredMapPlaces,
     selected,
     selectedDiscovered,
     selectedSearchResult,
@@ -645,6 +719,8 @@ export const useLocationStore = defineStore('loc', () => {
     runNearbySearch,
     clearNearbySearch,
     saveSearchResult,
+    saveDiscoveredPlace,
+    isGooglePlaceSaved,
     addNewPlace,
     setPlaceListStatus,
     deletePlace,
@@ -653,6 +729,7 @@ export const useLocationStore = defineStore('loc', () => {
     selectSearchResult,
     clearSelection,
     setSearchQuery,
+    setDiscoveredSearchQuery,
     setFilter,
     setPersonalListFilter,
     setDiscoveredSort,

@@ -15,6 +15,7 @@ class ItemBase(BaseModel):
     description: str
     public: bool
     list_status: ListStatus = Field(default="to_try")
+    google_place_id: str | None = None
 
 # For returning items (output) — includes DB-generated fields
 class ItemResponse(ItemBase):

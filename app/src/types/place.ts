@@ -16,6 +16,10 @@ export interface Place {
   category: string
   description: string
   listStatus: ListStatus
+  /* Shared restaurant identity with discovered / Places search. */
+  googlePlaceId?: string | null
+  /* When the spot was saved to the personal list. */
+  createdAt?: string | null
 }
 
 export interface ItemCreate {
@@ -27,6 +31,7 @@ export interface ItemCreate {
   description: string
   public: boolean
   list_status: ListStatus
+  google_place_id?: string | null
 }
 
 export interface ItemResponse extends ItemCreate {
@@ -50,6 +55,8 @@ export function itemToPlace(item: ItemResponse): Place {
     category: item.category,
     description: item.description,
     listStatus: item.list_status ?? 'to_try',
+    googlePlaceId: item.google_place_id ?? null,
+    createdAt: item.created_at ?? null,
   }
 }
 
@@ -66,5 +73,6 @@ export function placeToCreate(
     description: place.description,
     public: isPublic,
     list_status: place.listStatus ?? 'to_try',
+    google_place_id: place.googlePlaceId ?? null,
   }
 }

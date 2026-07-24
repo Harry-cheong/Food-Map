@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useLocationStore } from '../stores/location'
 import type { PlaceSearchResult } from '../types/placesSearch'
@@ -10,6 +11,7 @@ defineProps<{
 
 const auth = useAuthStore()
 const locStore = useLocationStore()
+const route = useRoute()
 
 const loginFail = ref(false)
 const formError = ref('')
@@ -23,7 +25,10 @@ const avatarInitial = computed(() =>
   auth.user?.username?.charAt(0).toUpperCase() ?? '?',
 )
 
+const showPlacesSearch = computed(() => route.name === 'home' || route.name === 'login')
+
 const showSearchDropdown = computed(() => {
+  if (!showPlacesSearch.value) return false
   if (!searchOpen.value) return false
   const q = locStore.placesSearchQuery.trim()
   if (q.length < 2) return false
@@ -160,12 +165,29 @@ function switchToLogin() {
 
 <template>
   <nav class="nav">
-    <a class="nav-logo" href="/">
+    <RouterLink class="nav-logo" to="/">
       <div class="logo-mark"><div class="logo-dot"></div></div>
       FoodMap
-    </a>
+    </RouterLink>
 
-    <div ref="searchRoot" class="nav-search">
+    <div class="nav-tabs" role="navigation" aria-label="Main">
+      <RouterLink
+        class="nav-tab"
+        to="/"
+        :class="{ 'nav-tab--active': route.name === 'home' || route.name === 'login' }"
+      >
+        Personal
+      </RouterLink>
+      <RouterLink
+        class="nav-tab"
+        to="/discover"
+        :class="{ 'nav-tab--active': route.name === 'discover' }"
+      >
+        Discover
+      </RouterLink>
+    </div>
+
+    <div v-if="showPlacesSearch" ref="searchRoot" class="nav-search">
       <i class="mdi mdi-magnify nav-search-icon" aria-hidden="true"></i>
       <input
         class="nav-search-input"
@@ -226,6 +248,8 @@ function switchToLogin() {
         </button>
       </div>
     </div>
+
+    <div v-else class="nav-spacer" aria-hidden="true"></div>
 
     <div class="nav-right">
       <template v-if="auth.isLoggedIn">
@@ -353,6 +377,38 @@ function switchToLogin() {
   height: 2px;
   background: var(--gradient-text);
   opacity: 0.55;
+}
+
+.nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nav-tab {
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.nav-tab:hover {
+  color: var(--text);
+  background: var(--border-soft);
+}
+
+.nav-tab--active {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.nav-spacer {
+  flex: 1;
+  min-width: 0;
 }
 
 .nav-search {

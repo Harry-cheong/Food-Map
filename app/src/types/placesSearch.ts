@@ -40,5 +40,6 @@ export function searchResultToPlace(r: PlaceSearchResult): Place {
     category: 'Restaurant',
     description: bits.join(' · ') || r.formatted_address,
     listStatus: 'to_try',
+    googlePlaceId: r.google_place_id,
   }
 }

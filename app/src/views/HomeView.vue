@@ -14,6 +14,7 @@ import { useMap } from '../composables/useMap'
 import { useUserLocation } from '../composables/useUserLocation'
 import { forwardGeocode, reverseGeocode } from '../composables/useGeocode'
 import { categoryAccent } from '../constants/categories'
+import { googleSearchUrl } from '../utils/googleSearch'
 import { storeToRefs } from 'pinia'
 import type { ListStatus } from '../types/place'
 
@@ -30,6 +31,30 @@ const { mapPlaces, selected, nearbyRadiusM, nearbyActive, isSearchingPlaces } =
 
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
 
+const selectedSavedDate = computed(() => {
+  const iso = selected.value?.createdAt
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+})
+
+const selectedSearchGoogleUrl = computed(() => {
+  const place = locStore.selectedSearchResult
+  if (!place) return null
+  return googleSearchUrl(place.name, place.formatted_address)
+})
+
+const selectedPlaceGoogleUrl = computed(() => {
+  const place = selected.value
+  if (!place) return null
+  return googleSearchUrl(place.name, place.location)
+})
+
 if (props.showLogin) {
   auth.openLogin()
 }
@@ -42,6 +67,7 @@ const resolvingAddress = ref(false)
 const setLocationOpen = ref(false)
 const nearMeOpen = ref(false)
 const originDraggable = ref(false)
+const addPinMode = ref(false)
 const addressQuery = ref('')
 const addressError = ref<string | null>(null)
 const isResolvingAddress = ref(false)
@@ -71,13 +97,14 @@ function onMapClick(latlng: { lat: number; lng: number }) {
   /*
   	- While placing the search origin, map taps move the pin instead of opening
   	- the add-spot modal.
+  	- Add-spot only runs when the map-control toggle is active.
   */
   if (originDraggable.value) {
     placeOriginAt(latlng)
     return
   }
 
-  if (locStore.activeFilter === 'discovered') return
+  if (!addPinMode.value) return
   if (locStore.hasPlacesSearchOverlay) return
   if (setLocationOpen.value || nearMeOpen.value) return
 
@@ -158,6 +185,7 @@ async function onLocateClick() {
   setLocationOpen.value = false
   nearMeOpen.value = false
   originDraggable.value = false
+  addPinMode.value = false
 
   if ((isTracking.value || originSource.value === 'gps') && userPosition.value) {
     focusUserLocation()
@@ -171,13 +199,27 @@ async function onLocateClick() {
   }
 }
 
+function toggleAddPinMode() {
+  if (!auth.isLoggedIn) {
+    auth.openLogin()
+    return
+  }
+
+  setLocationOpen.value = false
+  nearMeOpen.value = false
+  originDraggable.value = false
+  addPinMode.value = !addPinMode.value
+}
+
 function toggleSetLocation() {
   nearMeOpen.value = false
+  addPinMode.value = false
   setLocationOpen.value = !setLocationOpen.value
 }
 
 function toggleNearMe() {
   setLocationOpen.value = false
+  addPinMode.value = false
   nearMeOpen.value = !nearMeOpen.value
 }
 
@@ -188,6 +230,7 @@ function toggleDragPin() {
     originLabel.value = 'Map center - drag or tap to adjust'
     focusUserLocation()
   }
+  addPinMode.value = false
   originDraggable.value = !originDraggable.value
   if (originDraggable.value) setLocationOpen.value = true
 }
@@ -266,6 +309,7 @@ async function saveLabeledPin(payload: {
 
   pendingCoord.value = null
   addressHint.value = null
+  addPinMode.value = false
   locStore.selectPlace(place)
 }
 
@@ -334,17 +378,19 @@ void mapEl
             :class="
               originDraggable
                 ? 'mdi mdi-cursor-move'
-                : 'mdi mdi-cursor-default-click'
+                : addPinMode
+                  ? 'mdi mdi-map-marker-plus'
+                  : 'mdi mdi-cursor-default-click'
             "
           ></i>
           <template v-if="originDraggable">
             Drag the orange pin, or tap the map to place your search location
           </template>
-          <template v-else-if="locStore.activeFilter === 'discovered'">
-            Browse discoveries from the sidebar or map pins
+          <template v-else-if="addPinMode">
+            Tap the map to pin a food spot
           </template>
           <template v-else>
-            {{ auth.isLoggedIn ? 'Click the map to add a spot' : 'Sign in, then click the map to add a spot' }}
+            Use the + button to add a spot
           </template>
         </div>
 
@@ -359,6 +405,18 @@ void mapEl
 
         <button class="map-control" type="button" title="Refresh map" @click.stop="reload">
           <i class="mdi mdi-refresh"></i>
+        </button>
+
+        <button
+          class="map-control map-control--add"
+          type="button"
+          :class="{ 'map-control--active': addPinMode }"
+          title="Add a spot"
+          aria-label="Add a spot"
+          :aria-pressed="addPinMode"
+          @click.stop="toggleAddPinMode"
+        >
+          <i class="mdi mdi-map-marker-plus"></i>
         </button>
 
         <button
@@ -515,9 +573,9 @@ void mapEl
           <div
             class="focus-card"
             :class="{
-              'focus-card--discovered': locStore.selectedDiscovered || locStore.selectedSearchResult,
+              'focus-card--discovered': locStore.selectedSearchResult,
             }"
-            v-if="locStore.selectedDiscovered || locStore.selectedSearchResult || locStore.selected"
+            v-if="locStore.selectedSearchResult || locStore.selected"
           >
             <template v-if="locStore.selectedSearchResult">
               <div class="focus-card-icon">
@@ -550,95 +608,50 @@ void mapEl
                   </div>
                 </dl>
                 <div class="focus-card-actions">
-                  <button
-                    class="focus-card-save"
-                    type="button"
-                    :disabled="locStore.isSaving"
-                    @click="saveSelectedSearchResult('to_try')"
+                  <a
+                    v-if="selectedSearchGoogleUrl"
+                    class="focus-card-link"
+                    :href="selectedSearchGoogleUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
-                    <i
-                      :class="locStore.isSaving ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-bookmark-outline'"
-                    ></i>
-                    {{ locStore.isSaving ? 'Saving…' : 'Save to try' }}
-                  </button>
-                  <button
-                    class="focus-card-save focus-card-save--secondary"
-                    type="button"
-                    :disabled="locStore.isSaving"
-                    @click="saveSelectedSearchResult('tried')"
+                    <i class="mdi mdi-google"></i>
+                    Search on Google
+                  </a>
+                  <template
+                    v-if="locStore.isGooglePlaceSaved(locStore.selectedSearchResult.google_place_id)"
                   >
-                    <i class="mdi mdi-check-circle-outline"></i>
-                    Save as tried
-                  </button>
+                    <button class="focus-card-save focus-card-save--saved" type="button" disabled>
+                      <i class="mdi mdi-check"></i>
+                      Saved
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      class="focus-card-save"
+                      type="button"
+                      :disabled="locStore.isSaving"
+                      @click="saveSelectedSearchResult('to_try')"
+                    >
+                      <i
+                        :class="locStore.isSaving ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-bookmark-outline'"
+                      ></i>
+                      {{ locStore.isSaving ? 'Saving…' : 'Save to try' }}
+                    </button>
+                    <button
+                      class="focus-card-save focus-card-save--secondary"
+                      type="button"
+                      :disabled="locStore.isSaving"
+                      @click="saveSelectedSearchResult('tried')"
+                    >
+                      <i class="mdi mdi-check-circle-outline"></i>
+                      Save as tried
+                    </button>
+                  </template>
                 </div>
                 <p v-if="locStore.actionError" class="focus-card-error">
                   {{ locStore.actionError }}
                 </p>
-              </div>
-              <button
-                class="focus-card-close"
-                type="button"
-                aria-label="Dismiss"
-                @click="locStore.clearSelection()"
-              >
-                <i class="mdi mdi-close"></i>
-              </button>
-            </template>
-
-            <template v-else-if="locStore.selectedDiscovered">
-              <div class="focus-card-icon">
-                <i class="mdi mdi-compass-outline"></i>
-              </div>
-              <div class="focus-card-body">
-                <p class="focus-card-label">Discovered spot</p>
-                <p class="focus-card-title">
-                  {{ locStore.selectedDiscovered.google_name || locStore.selectedDiscovered.restaurant_name }}
-                </p>
-                <dl class="focus-details">
-                  <div v-if="locStore.selectedDiscovered.restaurant_name !== locStore.selectedDiscovered.google_name">
-                    <dt>Restaurant name</dt>
-                    <dd>{{ locStore.selectedDiscovered.restaurant_name }}</dd>
-                  </div>
-                  <div>
-                    <dt>Google address</dt>
-                    <dd>{{ locStore.selectedDiscovered.formatted_address }}</dd>
-                  </div>
-                  <div v-if="locStore.selectedDiscovered.source_category">
-                    <dt>Category</dt>
-                    <dd>{{ locStore.selectedDiscovered.source_category }}</dd>
-                  </div>
-                  <div v-if="locStore.selectedDiscovered.rating != null">
-                    <dt>Rating</dt>
-                    <dd>
-                      ★ {{ locStore.selectedDiscovered.rating.toFixed(1) }}
-                      <template v-if="locStore.selectedDiscovered.user_rating_count != null">
-                        ({{ locStore.selectedDiscovered.user_rating_count }} reviews)
-                      </template>
-                    </dd>
-                  </div>
-                  <div v-if="locStore.selectedDiscovered.business_status">
-                    <dt>Status</dt>
-                    <dd class="capitalize">
-                      {{ locStore.selectedDiscovered.business_status.replace(/_/g, ' ').toLowerCase() }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Source</dt>
-                    <dd>
-                      <a
-                        :href="locStore.selectedDiscovered.source_url"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        HungryGoWhere article
-                      </a>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Confirmed</dt>
-                    <dd>{{ new Date(locStore.selectedDiscovered.confirmed_at).toLocaleString() }}</dd>
-                  </div>
-                </dl>
               </div>
               <button
                 class="focus-card-close"
@@ -678,32 +691,47 @@ void mapEl
                 >
                   {{ locStore.selected.category }}
                 </span>
-                <button
-                  class="focus-card-save"
-                  type="button"
-                  :disabled="locStore.isUpdatingListStatus"
-                  @click="
-                    locStore.setPlaceListStatus(
-                      locStore.selected,
-                      locStore.selected.listStatus === 'tried' ? 'to_try' : 'tried',
-                    )
-                  "
-                >
-                  <i
-                    :class="
-                      locStore.isUpdatingListStatus
-                        ? 'mdi mdi-loading mdi-spin'
-                        : locStore.selected.listStatus === 'tried'
-                          ? 'mdi mdi-bookmark-outline'
-                          : 'mdi mdi-check-circle-outline'
+                <p v-if="selectedSavedDate" class="focus-card-saved">
+                  Saved {{ selectedSavedDate }}
+                </p>
+                <div class="focus-card-actions">
+                  <a
+                    v-if="selectedPlaceGoogleUrl"
+                    class="focus-card-link"
+                    :href="selectedPlaceGoogleUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <i class="mdi mdi-google"></i>
+                    Search on Google
+                  </a>
+                  <button
+                    class="focus-card-save"
+                    type="button"
+                    :disabled="locStore.isUpdatingListStatus"
+                    @click="
+                      locStore.setPlaceListStatus(
+                        locStore.selected,
+                        locStore.selected.listStatus === 'tried' ? 'to_try' : 'tried',
+                      )
                     "
-                  ></i>
-                  <template v-if="locStore.isUpdatingListStatus">Updating…</template>
-                  <template v-else-if="locStore.selected.listStatus === 'tried'">
-                    Move to to-try
-                  </template>
-                  <template v-else>Mark as tried</template>
-                </button>
+                  >
+                    <i
+                      :class="
+                        locStore.isUpdatingListStatus
+                          ? 'mdi mdi-loading mdi-spin'
+                          : locStore.selected.listStatus === 'tried'
+                            ? 'mdi mdi-bookmark-outline'
+                            : 'mdi mdi-check-circle-outline'
+                      "
+                    ></i>
+                    <template v-if="locStore.isUpdatingListStatus">Updating…</template>
+                    <template v-else-if="locStore.selected.listStatus === 'tried'">
+                      Move to to-try
+                    </template>
+                    <template v-else>Mark as tried</template>
+                  </button>
+                </div>
                 <p v-if="locStore.actionError" class="focus-card-error">
                   {{ locStore.actionError }}
                 </p>
@@ -830,19 +858,24 @@ void mapEl
   right: 64px;
 }
 
-.map-control--locate {
+.map-control--add {
   top: 64px;
 }
 
-.map-control--set-location {
+.map-control--locate {
   top: 112px;
 }
 
-.map-control--near-me {
+.map-control--set-location {
   top: 160px;
 }
 
+.map-control--near-me {
+  top: 208px;
+}
+
 .map-control--locate.map-control--active,
+.map-control--add.map-control--active,
 .map-control--set-location.map-control--active,
 .map-control--near-me.map-control--active {
   color: #2B6CB0;
@@ -850,6 +883,7 @@ void mapEl
   background: rgba(235, 248, 255, 0.92);
 }
 
+.map-control--add.map-control--active,
 .map-control--set-location.map-control--active,
 .map-control--near-me.map-control--active {
   color: #C05621;
@@ -864,6 +898,7 @@ void mapEl
   box-shadow: 0 4px 14px rgba(49, 130, 206, 0.35);
 }
 
+.map-control--add.map-control--active:hover,
 .map-control--set-location.map-control--active:hover,
 .map-control--near-me.map-control--active:hover {
   background: #DD6B20;
@@ -902,11 +937,11 @@ void mapEl
 }
 
 .map-panel--set-location {
-  top: 112px;
+  top: 160px;
 }
 
 .map-panel--near-me {
-  top: 160px;
+  top: 208px;
 }
 
 .map-panel-title {
@@ -1136,12 +1171,33 @@ void mapEl
 .focus-card-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 12px;
 }
 
 .focus-card-actions .focus-card-save {
   margin-top: 0;
+}
+
+.focus-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(15, 110, 86, 0.25);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.focus-card-link:hover {
+  background: var(--accent-bg);
+  border-color: rgba(15, 110, 86, 0.35);
 }
 
 .focus-card-save--secondary {
@@ -1156,6 +1212,13 @@ void mapEl
   box-shadow: none;
 }
 
+.focus-card-save--saved {
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: none;
+  cursor: default;
+}
+
 .focus-card-save:hover:not(:disabled) {
   box-shadow: var(--shadow-glow-lg);
   transform: translateY(-1px);
@@ -1164,6 +1227,11 @@ void mapEl
 .focus-card-save:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.focus-card-save--saved:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .focus-card-error {
@@ -1219,6 +1287,12 @@ void mapEl
   border-radius: var(--radius-full);
   display: inline-block;
   margin-top: 4px;
+}
+
+.focus-card-saved {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .focus-card-location {

@@ -4,8 +4,8 @@
 */
 
 export type ApiResult<T> =
-  | { data: T; error: null }
-  | { data: null; error: string }
+  | { data: T; error: null; status: number }
+  | { data: null; error: string; status: number | null }
 
 export interface ApiRequestOptions {
   method?: string
@@ -63,15 +63,19 @@ export async function apiRequest<T>(
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => null)
-      return { data: null, error: formatErrorDetail(errBody, response.status) }
+      return {
+        data: null,
+        error: formatErrorDetail(errBody, response.status),
+        status: response.status,
+      }
     }
 
     if (response.status === 204) {
-      return { data: null as T, error: null }
+      return { data: null as T, error: null, status: 204 }
     }
 
     const data = (await response.json()) as T
-    return { data, error: null }
+    return { data, error: null, status: response.status }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return {
@@ -80,6 +84,7 @@ export async function apiRequest<T>(
         message === 'Failed to fetch'
           ? 'Cannot reach the server. Is the backend running on port 8000?'
           : message,
+      status: null,
     }
   }
 }

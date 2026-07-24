@@ -3,7 +3,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import SidebarFoodDrawer from './SidebarFoodDrawer.vue'
 import {
   useLocationStore,
-  type DiscoveredSort,
   type NearbyMinRating,
   type NearbyMinReviews,
   type NearbySort,
@@ -17,19 +16,12 @@ const mobileOpen = ref(false)
 
 const filters: { id: PlaceFilter; label: string; short: string; icon: string }[] = [
   { id: 'personal', label: 'Personal', short: 'Personal', icon: 'mdi-bookmark-outline' },
-  { id: 'discovered', label: 'Discovered', short: 'Discover', icon: 'mdi-compass-outline' },
   { id: 'following', label: 'Following', short: 'Follow', icon: 'mdi-account-group-outline' },
 ]
 
 const personalLists: { id: PersonalListFilter; label: string }[] = [
   { id: 'to_try', label: 'To try' },
   { id: 'tried', label: 'Tried' },
-]
-
-const sortOptions: { id: DiscoveredSort; label: string }[] = [
-  { id: 'recent', label: 'Newest' },
-  { id: 'rating', label: 'Highly rated' },
-  { id: 'reviews', label: 'Most reviewed' },
 ]
 
 const nearbySortOptions: { id: NearbySort; label: string }[] = [
@@ -62,10 +54,6 @@ function setFilter(id: PlaceFilter) {
 
 function setPersonalList(id: PersonalListFilter) {
   locStore.setPersonalListFilter(id)
-}
-
-function setSort(id: DiscoveredSort) {
-  locStore.setDiscoveredSort(id)
 }
 
 function personalListCount(id: PersonalListFilter): number {
@@ -196,7 +184,6 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
       <div class="header-text">
         <p class="header-title">
           <template v-if="locStore.nearbyActive">Nearby</template>
-          <template v-else-if="locStore.activeFilter === 'discovered'">Discovered</template>
           <template v-else>Your spots</template>
         </p>
         <p class="header-count">
@@ -217,11 +204,6 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
                   : `${locStore.nearbyRadiusM / 1000}km`
               }}
             </template>
-          </template>
-          <template v-else-if="locStore.activeFilter === 'discovered'">
-            {{ locStore.discoveredPlaces.length }}
-            of {{ locStore.discoveredTotal }}
-            {{ locStore.discoveredTotal === 1 ? 'place' : 'places' }}
           </template>
           <template v-else>
             {{ locStore.personalPlaces.length }}
@@ -251,9 +233,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
         :placeholder="
           locStore.nearbyActive
             ? 'Filter nearby results…'
-            : locStore.activeFilter === 'discovered'
-              ? 'Search discovered spots…'
-              : 'Search your saved spots…'
+            : 'Search your saved spots…'
         "
         :value="locStore.searchQuery"
         @input="locStore.setSearchQuery(($event.target as HTMLInputElement).value)"
@@ -376,25 +356,6 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
       </button>
     </div>
 
-    <div
-      v-if="locStore.activeFilter === 'discovered' && !locStore.nearbyActive && (!collapsed || mobileOpen)"
-      class="sort-drawer"
-      role="group"
-      aria-label="Sort discovered places"
-    >
-      <span class="sort-label">Sort</span>
-      <button
-        v-for="s in sortOptions"
-        :key="s.id"
-        type="button"
-        class="sort-select"
-        :class="{ 'sort-select--active': locStore.discoveredSort === s.id }"
-        @click="setSort(s.id)"
-      >
-        {{ s.label }}
-      </button>
-    </div>
-
     <div class="sidebar-content" v-show="!collapsed || mobileOpen">
       <SidebarFoodDrawer />
     </div>
@@ -408,6 +369,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 
 .sidebar {
   width: var(--sidebar-width);
+  min-width: 320px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -421,6 +383,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
 
 .sidebar.collapsed {
   width: 72px;
+  min-width: 72px;
   background:
     linear-gradient(180deg, rgba(15, 110, 86, 0.04) 0%, transparent 28%),
     var(--sidebar-bg);
@@ -596,7 +559,7 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
   justify-content: space-between;
   gap: 8px;
   min-height: 64px;
-  padding: 14px 12px 14px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
@@ -880,14 +843,16 @@ defineExpose({ openMobile, closeMobile, ensureVisible })
     top: var(--nav-height);
     left: 0;
     bottom: 0;
-    width: min(300px, 86vw);
+    width: min(440px, 86vw);
+    min-width: 0;
     transform: translateX(-105%);
     border-right: 1px solid var(--border-soft);
     box-shadow: var(--shadow-lg);
   }
 
   .sidebar.collapsed {
-    width: min(300px, 86vw);
+    width: min(440px, 86vw);
+    min-width: 0;
     transform: translateX(-105%);
   }
 

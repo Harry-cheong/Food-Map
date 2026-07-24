@@ -164,3 +164,26 @@
 - Sidebar Personal sub-chips **To try** / **Tried** filter list + map markers;
   pin modal and search focus card choose which list on save; focus card can
   mark tried / move back to to-try
+
+## 2026-07-23
+**frontend** | Goal: polish the collapsed sidebar
+
+- Collapsed desktop sidebar is an icon rail with captions under each filter
+  (Personal / Follow) and a nearby shortcut when radius search is active
+- Active filter uses an accent fill + left edge bar; larger type across the
+  sidebar header, chips, search, and list rows
+
+## 2026-07-24
+**full-stack** | Goal: give Discover its own social-style page, separate from Personal
+
+- New `/discover` route (`DiscoverView` + `DiscoverFeedCard`): recommendation feed
+  beside a map; sort (Newest / Highly rated / Most reviewed), search, infinite scroll
+- Nav tabs **Personal** / **Discover**; Discovered removed from the Personal sidebar
+  filter rail so the map home stays list-focused
+- Save from Discover → `POST /items` as `to_try`; stay on Discover after save
+- Shared restaurant id: nullable `user_fav.google_place_id` + per-user unique partial
+  index; `create_item` returns 409 on duplicates; frontend short-circuits / shows Saved
+- Personal list shows **Saved \<date\>** from `created_at` (sidebar + focus card)
+- Aligned Discover typography/spacing with Personal (header, search, chips, list cards);
+  Personal sidebar width matched to Discover feed (`min(440px, 42vw)`)
+- Misc UX: map add-pin is a toggle (not every map click); Google search links on focus cards
